@@ -1,1 +1,11 @@
-
+**/node_modules/
+**/dist/
+**/__pycache__/
+*.py[cod]
+.git/
+.env
+.env.*
+data/
+*.db
+*.db-wal
+*.db-shm

@@ -1,0 +1,14 @@
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+
+# Local runtime data and Python cache
+data/
+**/__pycache__/
+*.py[cod]
+
+# Frontend build artifacts
+**/node_modules/
+frontend/dist/
+frontend/package-lock.json
