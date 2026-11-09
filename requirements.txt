@@ -1,0 +1,2 @@
+# cryptography 50.0.1 — Apache-2.0 OR BSD-3-Clause; AES-GCM und HKDF für SecretStore.
+cryptography==50.0.1

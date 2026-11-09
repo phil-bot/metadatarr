@@ -1,0 +1,68 @@
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #14243a;
+  background: #f4f6fb;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  --ink: #163653;
+  --paper: #fff9ef;
+  --blue: #0786d3;
+  --line: #d6deea;
+  --muted: #586b80;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, a { font: inherit; }
+button:focus-visible, a:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
+.topbar { min-height: 78px; display: flex; align-items: center; justify-content: space-between; padding: 0 clamp(20px, 5vw, 72px); border-bottom: 1px solid var(--line); background: #fff9ef; }
+.brand { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; font: 800 1.15rem Inter, system-ui, sans-serif; letter-spacing: -0.04em; }
+.brand img { display: block; }
+.phase-tag { color: var(--ink); border: 1px solid #b8c7d7; padding: 7px 12px; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.main-content { width: min(100% - 40px, 880px); margin: auto; padding: 82px 0 72px; }
+.eyebrow { color: #315b7e; font-size: 0.76rem; font-weight: 700; letter-spacing: 0.16em; }
+h1 { max-width: 760px; margin: 14px 0 18px; color: var(--ink); font: 800 clamp(2.3rem, 6vw, 4.5rem)/1.05 Inter, system-ui, sans-serif; letter-spacing: -0.065em; }
+.intro { max-width: 660px; color: #42566c; font-size: 1.12rem; line-height: 1.7; }
+.status-panel { display: flex; align-items: center; gap: 18px; margin-top: 42px; padding: 22px; border: 1px solid #c6d4e2; border-left: 5px solid var(--blue); background: #fff; box-shadow: 0 12px 32px rgba(20, 36, 58, 0.06); }
+.status-panel.is-error { border-left-color: #a63838; }
+.status-mark { flex: 0 0 52px; width: 52px; height: 52px; display: grid; place-items: center; background: #e6f3fa; color: var(--ink); font-size: 0.8rem; font-weight: 800; }
+.is-error .status-mark { color: #7e2222; background: #f8e8e6; }
+.status-copy { flex: 1; min-width: 0; }
+.status-kicker { margin: 0 0 4px; color: #557088; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; }
+.status-copy h2 { margin: 0; color: var(--ink); font: 700 1.2rem Inter, system-ui, sans-serif; }
+.status-copy p:last-child { margin: 5px 0 0; color: var(--muted); font-size: 0.93rem; overflow-wrap: anywhere; }
+.retry-button { min-height: 42px; padding: 0 15px; border: 0; color: var(--paper); background: var(--ink); cursor: pointer; font-weight: 700; }
+.retry-button:hover { background: #244c6d; }
+.retry-button:active { transform: translateY(1px); }
+.note { margin-top: 26px; padding-left: 14px; border-left: 2px solid #9ab2c5; color: #52677c; font-size: 0.9rem; line-height: 1.6; }
+code { color: var(--ink); font-size: 0.9em; }
+.footer { padding: 20px clamp(20px, 5vw, 72px); border-top: 1px solid var(--line); color: #60758a; font-size: 0.82rem; }
+
+@media (prefers-color-scheme: dark) {
+  :root { color: #e8edf7; background: #14243a; --line: #354760; --muted: #c0cbda; }
+  .topbar { background: #182b43; }
+  .brand, h1, .status-copy h2, code { color: #e8edf7; }
+  .phase-tag { color: #e8edf7; border-color: #596b85; }
+  .eyebrow { color: #a9c3e0; }
+  .intro, .note, .footer { color: #c0cbda; }
+  .status-panel { background: #1a2d47; border-color: #415570; border-left-color: #8ba1ff; }
+  .status-mark { color: #14243a; background: #8ba1ff; }
+  .status-copy p:last-child, .status-kicker { color: #c0cbda; }
+  .retry-button { color: #14243a; background: #8ba1ff; }
+  .retry-button:hover { background: #a1b2ff; }
+}
+
+@media (max-width: 600px) {
+  .topbar { min-height: 68px; }
+  .main-content { padding: 56px 0; }
+  .status-panel { align-items: flex-start; flex-wrap: wrap; padding: 18px; }
+  .status-copy { flex-basis: calc(100% - 70px); }
+  .retry-button { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}

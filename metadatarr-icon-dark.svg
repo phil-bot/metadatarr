@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Metadatarr Icon — Dark</title>
+  <desc id="desc">Quadratisches Metadatarr-Icon für dunkle Themes.</desc>
+  <!-- Farbschema (sRGB): DARK — Kachel #E8EDF7 bis #F4F6FB, Klammern #14243A, Akzent #8BA1FF. LIGHT-Alternative — Kachel #163653 bis #153653, Klammern #FFF9EF, Akzent #0786D3. Außenbereich transparent. -->
+  <defs>
+    <linearGradient id="tile-dark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#E8EDF7"/>
+      <stop offset="100%" stop-color="#F4F6FB"/>
+    </linearGradient>
+  </defs>
+  <g transform="scale(2.089795918) translate(-205 -261.5)">
+    <rect x="205" y="261.5" width="245" height="245" rx="34" fill="url(#tile-dark)"/>
+    <path d="M259 303 C251 303 244 310 244 319 V448 C244 457 251 463 259 463 H289 V440 H269 V328 H289 V303 Z" fill="#14243A"/>
+    <path d="M365 303 H395 C404 303 410 310 410 319 V448 C410 457 404 463 396 463 H365 V440 H386 V328 H365 Z" fill="#14243A"/>
+    <rect x="296" y="352" width="64" height="64" fill="#8BA1FF"/>
+  </g>
+</svg>

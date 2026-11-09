@@ -1,0 +1,43 @@
+services:
+
+#
+# TBA-TICKETS - deutsche Serien mit TBA-Folgen finden, TVDB-Tickets vorbereiten
+#
+# Vorbereitung:
+#   1. Ordner ./tba-tickets neben dieser Stack-Compose-Datei anlegen (relativer Pfad, wie bei build:) und ALLE .py-Dateien, Dockerfile sowie den Ordner frontend/ hineinlegen
+#   2. Ordner ${DOCKER}/tba-tickets/data für die SQLite-Datenbank anlegen (Volume /data)
+#   3. In der .env ergänzen:  SONARR_APIKEY=...  (Variable heißt SONARR_APIKEY, wird als SONARR_API_KEY an die App übergeben)
+#   4. Hostnamen unten bei Bedarf anpassen
+#   5. ports: 8083:8080 ist bewusst gesetzt
+#
+
+  tba-tickets:
+    build: ./tba-tickets
+    container_name: tba-tickets
+    hostname: tba-tickets
+    restart: unless-stopped
+    user: ${PUID}:${PGID}
+    environment:
+      - TZ=${TZ}
+      - SONARR_URL=http://sonarr:8989
+      - SONARR_API_KEY=${SONARR_APIKEY}
+      - SONARR_PUBLIC_URL=https://sonarr.grothu.net
+      - ORIGINAL_LANGUAGE=German
+      - TMDB_API_KEY=${TMDB_APIKEY}
+      - DEEPL_API_KEY=${DEEPL_APIKEY}
+      - TVDB_USER=${TVDB_USER}
+      - TVDB_PASSWORD=${TVDB_PASSWORD}
+      - METADATARR_SECRET_KEY=${METADATARR_SECRET_KEY}
+    volumes:
+      - ${DOCKER}/tba-tickets/data:/data
+    depends_on:
+      - sonarr
+    ports:
+      - "8083:8080"
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.tba.rule=Host(`tba.grothu.net`)
+      - traefik.http.routers.tba.tls=true
+      - traefik.http.routers.tba.tls.certresolver=servercow
+      - traefik.http.routers.tba.entrypoints=https
+      - traefik.http.routers.tba.middlewares=internal@file
