@@ -74,4 +74,4 @@ Do not use a TVDB ticket submission as a health check.
 
 ## Current Phase 1 status
 
-The Phase 1 backend suite contains 25 tests and the legacy regression suite contains 69 tests. Version `v0.1.0` is published in GHCR after the release workflow completed its checks and Docker build. Final Phase 1 acceptance is still pending runtime health checks.
+The Phase 1 backend suite contains 25 tests and the legacy regression suite contains 69 tests. Version `v0.1.0` is published in GHCR after the release workflow completed its checks and Docker build. Phase 1 is accepted. The Phase 1 tests are complete, and the runtime health checks (`/health`, `/api/v1/health`, `/app/`) were confirmed on the deployed `v0.1.0` image.

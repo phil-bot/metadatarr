@@ -1,11 +1,22 @@
 # Projektstand: TBA-Tickets für TheTVDB
 
-**Zuletzt aktualisiert:** 09.11.2026 (Sitzung 27, Phase 1 – Backend-Abnahmelücken behoben; Docker-/CI-Lauf noch offen)
+**Zuletzt aktualisiert:** 09.11.2026 (Sitzung 28, Stand v0.1.0 veröffentlicht; Phase 1 nach Tests und Laufzeit-Checks abgenommen)
 **Übergabedokument:** `HANDOFF.md`, Stand 15.10.2026, SHA-256 `c10f52960f0d786296ab4e64fc677ff33df44a0820fb79334eb96ac8af36b512`
 
 ---
 
 ## Nächster Schritt
+
+**Aktueller Stand (Sitzung 28, 09.11.2026), maßgeblich vor den älteren Punkten unten:**
+- ✅ **Nutzer:** GitHub-CI für den Stand mit v0.1.0 ist erfolgreich abgeschlossen (laut Nutzer; Logs nicht vom Agenten eingesehen).
+- ✅ **Nutzer:** Image `ghcr.io/phil-bot/metadatarr` ist öffentlich, Tags `0.1.0` und `latest` sind veröffentlicht (laut Nutzer, vom Agenten nicht über die Registry geprüft).
+- ✅ **Compose-Snippet:** `image: ghcr.io/phil-bot/metadatarr:0.1.0` statt lokalem Build. Ports, Volumes, Umgebungsvariablen und Labels unverändert.
+- ✅ **Frontend:** `vite` in `frontend/package.json` von 6.3.5 auf 6.3.6 angehoben. Adressiert laut Befund GHSA-jqfw-vq24-v9c3; ein vollständiges `npm audit` war offline ohne Lockdatei nicht möglich. Keine `package-lock.json`, kein `npm audit fix --force`.
+- ✅ **Nutzer:** Laufzeit-Checks nach dem Deployment bestanden (`/health`, `/api/v1/health`, `/app/`; laut Nutzer, vom Agenten nicht selbst geprüft). Phase 1 ist damit abgenommen.
+- ⬜ **Agent (offen, Vorschlag, noch nicht umgesetzt):** Release-Härtung in `.github/workflows/ci.yml`: Im Validierungsjob prüfen, dass die Tag-Version zu `frontend/package.json` passt. Zusätzlich SHA-Pinning der Actions, sofern Commit-SHAs bereitgestellt werden. Umsetzung erst nach Freigabe des konkreten Diffs.
+- ⬜ **Agent:** Dokumentation auf den Stand v0.1.0 bringen (dieser Eintrag, HANDOFF.md-Hinweis, Startprompt in ARBEITSANWEISUNGEN.md).
+
+**Ältere Einträge (Stand 16.10. bis 09.11.2026, teilweise überholt):**
 
 1. ✅ **Nutzer:** `docker-compose.snippet.yml` ist im Ordner. `dockerfile` wurde in `Dockerfile` umbenannt.
 2. ✅ **Nutzer:** Host-Pfad entfällt (Nutzer: nicht nötig, Pfad ist über Umgebungsvariablen geregelt).
@@ -228,6 +239,8 @@ Historischer Hinweis (Sitzungen 2–13): In früheren Bash-Arbeitskopien waren `
 ## 7. Änderungslog
 
 **09.11.2026 – Sitzung 26:** Backend-Fundament erweitert. Hinzugefügt: Migrations-/Backuprahmen, SecretStore, Redaktor, Audit, Registries, SafeHTTP-Client, API-Schutz und 10 Tests. Geändert: `speicher.py`, `config.py`, `sonarr.py`, `web.py`, `Dockerfile`, CI-Workflow und dieser Projektstand. Verifiziert: 10 neue Tests und 69 bestehende Tests bestanden; 20 Python-Dateien syntaktisch geprüft. Phase 1 bleibt offen, da die vollständigen Abnahmekriterien J.1 und Docker-/CI-Lauf noch ausstehen.
+
+**09.11.2026 – Sitzung 28:** Übernahme des Stands nach GHCR-Veröffentlichung. Laut Nutzer: GitHub-CI für den Stand v0.1.0 erfolgreich; Image `ghcr.io/phil-bot/metadatarr` öffentlich mit Tags `0.1.0` und `latest`. Geändert: `docker-compose.snippet.yml` (Image `ghcr.io/phil-bot/metadatarr:0.1.0` statt lokalem Build; übrige Einstellungen unverändert), `frontend/package.json` (`vite` 6.3.5 → 6.3.6, Befund GHSA-jqfw-vq24-v9c3; `npm audit` offline nicht möglich, keine Lockdatei), `PROJEKTSTAND.md` (dieser Stand), `HANDOFF.md` (Hinweis auf Überholung), `ARBEITSANWEISUNGEN.md` (Projektname und Ordner im Startprompt). Vom Nutzer bestätigt: Laufzeit-Checks (`/health`, `/api/v1/health`, `/app/`) bestanden; Phase 1 mit Tests abgeschlossen und abgenommen. Vom Agenten nicht geprüft: Registry-Stand. Offen (Vorschlag, nicht umgesetzt): Tag-Abgleich mit `package.json` im Validierungsjob, SHA-Pinning der Actions.
 
 **09.11.2026 – Sitzung 27:** Phase-1-Suite auf 25 Tests erweitert; Cache-Redaktion in `speicher.py` und Antwortheader-Redaktion in `net/http_client.py` ergänzt. Dateiinventar und CI-Beschreibung aktualisiert; `scripts/db_inspect.py` und `scripts/sonarr_probe.py` in die Arbeitskopie übernommen. Der vollständige Python-`py_compile`-Schritt aus CI lief für alle 22 Dateien, einschließlich der beiden Prüfscripte, erfolgreich. Phase-1-Tests 25/25 und Regressionstests 69/69 bestanden. Docker-Build, GitHub-CI und Vite/TypeScript-Build bleiben extern noch aus; Phase 1 daher weiterhin nicht abgenommen. Für den Start im neuen GitHub-Repository wurden `README.md`, `.gitignore` und `.env.example` ohne geheime Werte ergänzt.
 

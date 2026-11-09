@@ -1,5 +1,7 @@
 # Projektübergabe: TBA-Tickets (Sonarr → Mediathek/TMDB → TheTVDB-Tickets)
 
+> **Hinweis (Stand 09.11.2026, Sitzung 28):** Diese Übergabe ist teilweise überholt. Das Repository heißt jetzt **Metadatarr**. Die Version `v0.1.0` ist laut Nutzer in GHCR veröffentlicht (`ghcr.io/phil-bot/metadatarr`, Tags `0.1.0` und `latest`), das Compose-Snippet nutzt dieses Image. Maßgeblich ist `PROJEKTSTAND.md`.
+
 Stand: 16.10.2026 (aktualisiert gegenüber 15.10.2026, siehe Abschnitt 12). Dieses Dokument enthält alles, was ein anderer KI-Agent braucht, um nahtlos weiterzuarbeiten.
 Es enthält **keine Zugangsdaten**. API-Keys liefert der Nutzer selbst.
 

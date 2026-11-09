@@ -7,7 +7,7 @@ Gilt für jede Sitzung in diesem Projektordner. Die Projektdaten stehen in `PROJ
 ## 1. Sitzungsstart (immer in dieser Reihenfolge)
 
 1. Ordnerinhalt neu prüfen (`list /mnt/data`). Nichts aus dem Gedächtnis übernehmen.
-2. Lesen: `ARBEITSANWEISUNGEN.md`, dann `PROJEKTSTAND.md`, dann `HANDOFF.md`. Danach die Projektdateien prüfen. Stand 16.10.2026: `app.py` und `dockerfile` liegen im Ordner-Root, nicht in `app/`.
+2. Lesen: `ARBEITSANWEISUNGEN.md`, dann `PROJEKTSTAND.md`, dann `HANDOFF.md`. Danach die Projektdateien prüfen. Stand 09.11.2026: Alle Projektdateien liegen flach im Ordner-Root (u. a. `app.py`, `Dockerfile`); Unterordner `api/`, `core/`, `net/`, `plugins/`, `tests/`, `scripts/`, `frontend/`.
 3. Abschnitt „Nächster Schritt“ in `PROJEKTSTAND.md` prüfen. Wenn der Nutzer etwas anderes will, Abweichung nennen.
 4. Dateiliste auf Dubletten und fehlende Dateien prüfen. Gefundenes sofort melden.
 5. Die Sitzungsnummer im Änderungslog um eins erhöhen, sobald gearbeitet wird.
@@ -29,7 +29,7 @@ Gilt für jede Sitzung in diesem Projektordner. Die Projektdaten stehen in `PROJ
 
 **Ursache (Stand 17.10.2026):** Dateien unter `/mnt/data/` werden per `cp` aus bash angelegt, während der Zielname schon existiert. Das System legt dann eine Kopie mit `(2)` an, das Original bleibt. Ein Schreibvorgang per bash in `/mnt/data/` ist deshalb verboten. Auch Bearbeitungen von zwei Dateien in parallelen Aufrufen führen zu verlorenen Änderungen. Bearbeitungen deshalb immer nacheinander und danach prüfen.
 
-**Quelle der Wahrheit:** Der Projektordner, abgefragt mit `list` (folderName „Deutsche Serientitel“). Die bash-Sicht unter `/mnt/data/` kann zusätzliche `(2)`-Kopien zeigen. Vor jeder Aussage über Ordnerinhalte `list` ausführen und Abweichungen zur bash-Sicht dem Nutzer nennen.
+**Quelle der Wahrheit:** Der Projektordner, abgefragt mit `list` (folderName „Metadatarr“). Die bash-Sicht unter `/mnt/data/` kann zusätzliche `(2)`-Kopien zeigen. Vor jeder Aussage über Ordnerinhalte `list` ausführen und Abweichungen zur bash-Sicht dem Nutzer nennen.
 
 **Vor jedem Schreibvorgang:**
 
@@ -103,4 +103,4 @@ Das Projekt läuft über viele Sitzungen. Der Stand wird nur über `PROJEKTSTAND
 
 ## 7. Startprompt für eine neue Sitzung
 
-> Du übernimmst das Projekt „TBA-Tickets für TheTVDB“ im Ordner „Deutsche Serientitel“. Lies zuerst `ARBEITSANWEISUNGEN.md`, dann `PROJEKTSTAND.md` und `HANDOFF.md`. Prüfe den Ordnerinhalt neu. Antworte auf Deutsch. Stelle klärende Fragen vorab, stelle Vorhaben vor und warte auf Freigabe, bevor du Code schreibst. Arbeite nach den Dateiregeln (keine Suffix-Dateien, keine Löschung aus bash). Aktualisiere am Ende `PROJEKTSTAND.md`.
+> Du übernimmst das Projekt „Metadatarr“ (vormals „TBA-Tickets für TheTVDB“) im Ordner „Metadatarr“. Lies zuerst `ARBEITSANWEISUNGEN.md`, dann `PROJEKTSTAND.md` und `HANDOFF.md`. Prüfe den Ordnerinhalt neu. Antworte auf Deutsch. Stelle klärende Fragen vorab, stelle Vorhaben vor und warte auf Freigabe, bevor du Code schreibst. Arbeite nach den Dateiregeln (keine Suffix-Dateien, keine Löschung aus bash). Aktualisiere am Ende `PROJEKTSTAND.md`.
