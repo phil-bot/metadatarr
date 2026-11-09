@@ -4,7 +4,7 @@ services:
 # TBA-TICKETS - deutsche Serien mit TBA-Folgen finden, TVDB-Tickets vorbereiten
 #
 # Vorbereitung:
-#   1. Ordner ./tba-tickets neben dieser Stack-Compose-Datei anlegen (relativer Pfad, wie bei build:) und ALLE .py-Dateien, Dockerfile sowie den Ordner frontend/ hineinlegen
+#   1. Das GHCR-Image ist auf Version 0.1.0 festgelegt; für ein Update nur den Tag in der image-Zeile ändern und anschließend `docker compose pull tba-tickets` ausführen
 #   2. Ordner ${DOCKER}/tba-tickets/data für die SQLite-Datenbank anlegen (Volume /data)
 #   3. In der .env ergänzen:  SONARR_APIKEY=...  (Variable heißt SONARR_APIKEY, wird als SONARR_API_KEY an die App übergeben)
 #   4. Hostnamen unten bei Bedarf anpassen
@@ -12,7 +12,7 @@ services:
 #
 
   tba-tickets:
-    build: ./tba-tickets
+    image: ghcr.io/phil-bot/metadatarr:0.1.0
     container_name: tba-tickets
     hostname: tba-tickets
     restart: unless-stopped
