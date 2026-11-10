@@ -1,13 +1,13 @@
 # Projektstand: Metadatarr (vormals TBA-Tickets für TheTVDB)
 
-**Zuletzt aktualisiert:** 10.11.2026 (Sitzung 30; Phase 2 umgesetzt und lokal abgenommen; keine Veröffentlichung)
+**Zuletzt aktualisiert:** 10.11.2026 (Phase 3 umgesetzt und lokal abgenommen; keine Veröffentlichung)
 **Übergabedokument:** `HANDOFF.md`, Stand 15.10.2026, SHA-256 `c10f52960f0d786296ab4e64fc677ff33df44a0820fb79334eb96ac8af36b512`
 
 ---
 
 ## Nächster Schritt
 
-**Aktueller Stand (Sitzung 30, 10.11.2026), maßgeblich vor den älteren Punkten unten:**
+**Aktueller Stand (10.11.2026), maßgeblich vor den älteren Punkten unten:**
 - ✅ **Nutzer (Sitzung 28):** GitHub-CI für den Stand mit v0.1.0 erfolgreich; Image `ghcr.io/phil-bot/metadatarr` öffentlich, Tags `0.1.0` und `latest` veröffentlicht. Laufzeit-Checks (`/health`, `/api/v1/health`, `/app/`) bestanden. Vom Agenten nicht unabhängig geprüft.
 - ✅ **Compose-Snippet:** `image: ghcr.io/phil-bot/metadatarr:0.1.0`; Ports, Volumes, Umgebungsvariablen und Labels unverändert.
 - ✅ **Frontend:** `vite` in `frontend/package.json` auf 6.3.6 angehoben. Befund GHSA-jqfw-vq24-v9c3; vollständiges `npm audit` offline ohne Lockdatei nicht möglich. Keine `package-lock.json`.
@@ -22,6 +22,12 @@
 - ✅ **Lokale Abnahme:** 43/43 Backend-`unittest`-Tests und 71/71 Legacy-/Attrappenchecks; Syntax/Kompilierung erfolgreich. Tests liefen ausschließlich mit lokalen Attrappen/Mocks.
 - ⚠️ **Nicht extern verifiziert:** echter Docker-Build, GitHub-CI-Lauf, Browser-Sichtprüfung und Zugriff auf echte Dienste. Kein Sonarr-Livezugriff.
 - ⚠️ **Planabweichungen:** `UMSETZUNGSPLAN.md` blieb gemäß Vorgabe unverändert; sein Statusvermerk ist älter, und E.6.4 enthält weiterhin eine Lockdatei-Aussage entgegen der Entscheidung, keine `package-lock.json` anzulegen.
+- ✅ **Phase 3 umgesetzt:** Mediathek, TMDB, fernsehserien.de und DeepL sind getrennte Quellen-Plugins; DeepL-Kandidaten behalten eine maschinenübersetzt-Markierung und den Ursprungskandidaten. Migration auf Schema v2 ist additiv, sichert und prüft vorab, backfillt Kandidaten und erhält Legacy-Status/IDs.
+- ✅ **Tickets und Aktion:** lokale Tickets-API ergänzt; TVDB-Ticket ist ein getrenntes Aktions-Plugin mit serverseitiger Vorschau, Bestätigung, Snapshot-Prüfung und Idempotenz. Der alte HTML-Einreichungspfad schreibt nicht extern.
+- ✅ **Nachtlauf:** berücksichtigt nur aktivierte, freigegebene Mediathek-/TMDB-Nachtquellen; keine externe Ticket-Einreichung. Sonarr bleibt lesend.
+- ✅ **Lokale Abnahme Phase 3:** 61/61 Backend-`unittest`-Tests, 71/71 Legacy-Checks und `compileall` erfolgreich. Provider und TVDB-Transport wurden mit Attrappen/Mocks geprüft.
+- ⚠️ **Nicht durchgeführt:** produktive Datenbank/Dienste, Live-Netzwerkzugriffe, externe Schreibaktionen, Frontend (Phase 4), CI/Docker-Build und Publishing.
+- ⚠️ **Plan unverändert:** `UMSETZUNGSPLAN.md`, CI, Compose, Dockerfile, Requirements und Frontend wurden nicht geändert.
 
 **Ältere Einträge (Stand 16.10. bis 09.11.2026, teilweise überholt):**
 

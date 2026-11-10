@@ -1,11 +1,13 @@
 """tba-tickets – Nächtliche Hintergrundsuche."""
 import time
 from datetime import datetime, timedelta
-from config import NIGHTLY_HOUR, SONARR_API_KEY, SONARR_URL, TMDB_API_KEY, TVDB_STATUS_NIGHTLY
+from config import NIGHTLY_HOUR, SONARR_API_KEY, SONARR_URL, TVDB_PASSWORD, TVDB_STATUS_NIGHTLY, TVDB_USER
 from sonarr import get_data
 from speicher import cache_put
 from ticket import refresh_tvdb_statuses
 from vorschlaege import NIGHTLY_STAGES, search_chain
+from plugins.sources import nightly_source_keys
+from net.redaction import REDACTOR
 
 
 def seconds_until_next_run(now=None):
@@ -17,7 +19,7 @@ def seconds_until_next_run(now=None):
 
 
 def redact(text):
-    return text.replace(TMDB_API_KEY, "***") if TMDB_API_KEY else text
+    return REDACTOR.redact_text(text)
 
 
 def run_nightly():
@@ -29,12 +31,16 @@ def run_nightly():
         print("Nachtlauf übersprungen: Sonarr ist nicht konfiguriert.", flush=True)
         return
     data = get_data(force=True)
+    active_stages = tuple(key for key in NIGHTLY_STAGES if key in nightly_source_keys())
     done = 0
     for s in data["series"]:
         if not any(e.get("airDate") for e in s["tba"]):
             continue
         try:
-            counts, note = search_chain(s, None, force=True, stages=NIGHTLY_STAGES)
+            if not active_stages:
+                counts, note = "", "Keine aktivierte Nachtquelle."
+            else:
+                counts, note = search_chain(s, None, force=True, stages=active_stages)
             done += 1
             print(f"Nachtlauf {s['title']}: {counts}. {note}".rstrip(), flush=True)
         except Exception as exc:  # noqa: BLE001 - Lauf geht bei Fehlern weiter
@@ -42,7 +48,7 @@ def run_nightly():
                   f"{type(exc).__name__}: {redact(str(exc))}", flush=True)
     cache_put("nightly", {"time": time.time(), "rows": done})
     print(f"Nachtlauf beendet: {done} Serien geprüft.", flush=True)
-    if TVDB_STATUS_NIGHTLY:
+    if TVDB_STATUS_NIGHTLY and TVDB_USER and TVDB_PASSWORD:
         print(refresh_tvdb_statuses(), flush=True)
 
 
