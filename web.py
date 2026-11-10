@@ -13,9 +13,10 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from api.router import BODY_LIMIT, dispatch as dispatch_api
-from config import (CSRF_TOKEN, DB_PATH, NIGHTLY_HOUR, NIGHTLY_SEARCH, ORIGINAL_LANGUAGE, SHOW_POSTERS, SONARR_API_KEY,
+from config import (CSRF_TOKEN, DB_PATH, NIGHTLY_HOUR, NIGHTLY_SEARCH, SHOW_POSTERS, SONARR_API_KEY,
                     SONARR_PUBLIC_URL, SONARR_URL, TMDB_API_KEY, config_overview)
 from sonarr import fetch_poster, get_data, POSTERS
+from core.poster_service import PosterFetchError
 from speicher import STATUSES, cache_get_raw, db_exec
 from ticket import (LANG_NAME, create_ticket, render_ticket_page, report_csv, status_chip, ticket_label, ticket_list,
                     ticket_name, ticket_refresh_one, ticket_status, ticket_submit, ticket_text)
@@ -276,7 +277,6 @@ def render_index(data):
     with_tba = [s for s in series if s["tba"]]
     tba_total = sum(len(s["tba"]) for s in series)
     tba_future = sum(1 for s in series for e in s["tba"] if e["state"] == "angekündigt")
-    lang = "alle Sprachen" if ORIGINAL_LANGUAGE == "*" else f"Originalsprache {esc(ORIGINAL_LANGUAGE)}"
     marked = db_exec("SELECT COUNT(*) AS n FROM suggestion WHERE marked = 1 AND status != 'verworfen'", fetch=True)[0]["n"]
     open_tickets = db_exec(
         "SELECT * FROM ticket WHERE status = 'erstellt' OR tvdb_no IS NOT NULL "
@@ -286,7 +286,7 @@ def render_index(data):
 
     body = [
         "<div class='pagehead'><div><h1>Übersicht</h1>"
-        f"<p class='meta' style='margin:0'>Auswahl: {lang}. Die App liest nur, in Sonarr wird nichts geändert.</p></div>"
+        "<p class='meta' style='margin:0'>Alle Serien werden berücksichtigt. Die App liest nur, in Sonarr wird nichts geändert.</p></div>"
         f"{refresh_form(data)}</div>",
         "<div class='stats'>"
         + stat(len(series), "Serien", "tv")
@@ -299,9 +299,7 @@ def render_index(data):
     ]
     if not series:
         body.append(
-            "<div class='err'>Keine Serie mit Originalsprache "
-            f"„{esc(ORIGINAL_LANGUAGE)}“ gefunden (Sonarr kennt insgesamt {data['seriesTotal']} Serien). "
-            "Prüfe ORIGINAL_LANGUAGE oder setze „*“ für alle Serien.</div>"
+            f"<div class='err'>Keine Serien verfügbar (Sonarr kennt insgesamt {data['seriesTotal']} Serien).</div>"
         )
     cols = ["<div>"]
     cols.append("<div class='card'><h2>Serien mit TBA-Folgen</h2>")
@@ -339,8 +337,7 @@ def render_serien(data, show_all):
         "<input type='text' id='serienfilter' placeholder='Serie suchen …' autocomplete='off'></div>",
     ]
     if not series:
-        body.append("<div class='err'>Keine Serie mit Originalsprache "
-                    f"„{esc(ORIGINAL_LANGUAGE)}“ gefunden (Sonarr kennt insgesamt {data['seriesTotal']} Serien).</div>")
+        body.append(f"<div class='err'>Keine Serien verfügbar (Sonarr kennt insgesamt {data['seriesTotal']} Serien).</div>")
     elif not rows:
         body.append("<p class='mut'>Keine TBA-Folgen gefunden.</p>")
     else:
@@ -390,7 +387,7 @@ def render_diagnose(data, err, msg=""):
         sonarr_box = f"<span class='chip warn'>Fehler</span><p class='small'>{esc(err)}</p>"
     else:
         sonarr_box = (f"<span class='chip ok'>verbunden</span>"
-                      + kv(("Serien insgesamt", data["seriesTotal"]), ("davon ausgewählt", len(data["series"])),
+                      + kv(("Serien insgesamt", data["seriesTotal"]), ("Serien eingelesen", len(data["series"])),
                            ("Stand der Daten", data["fetched"].strftime("%d.%m.%Y %H:%M:%S"))))
     try:
         size = f"{os.path.getsize(DB_PATH) / 1024:.0f} KB"
@@ -601,12 +598,14 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_bytes(200, raw, content_type,
                                 {"X-Content-Type-Options": "nosniff"})
 
-    def _send_image(self, raw, ctype):
+    def _send_image(self, raw, ctype, headers=None):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "private, max-age=86400")
         self.send_header("X-Content-Type-Options", "nosniff")
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
         self.end_headers()
         self.wfile.write(raw)
 
@@ -642,17 +641,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, render_diagnose(None, "SONARR_URL und/oder SONARR_API_KEY sind nicht gesetzt."))
             data, err = self._safe_data()
             return self._send(200, render_diagnose(data, err, (urllib.parse.parse_qs(parsed.query).get("meldung") or [""])[0]))
-        if not SONARR_URL or not SONARR_API_KEY:
-            return self._send(500, render_error("SONARR_URL und/oder SONARR_API_KEY sind nicht gesetzt."))
         match = re.fullmatch(r"/poster/(\d+)", parsed.path)
         if match:
             if not SHOW_POSTERS:
-                return self._send(404, "kein Poster", "text/plain; charset=utf-8")
-            self._safe_data()  # füllt bei Bedarf den Speicher, damit die Poster-Adresse bekannt ist
-            img = fetch_poster(int(match.group(1)))
+                return self._send(404, "kein Poster", "text/plain; charset=utf-8", {"X-Poster-Reason": "disabled"})
+            if not SONARR_URL or not SONARR_API_KEY:
+                return self._send(503, "Sonarr ist nicht konfiguriert.", "text/plain; charset=utf-8",
+                                 {"X-Poster-Reason": "not-configured"})
+            data, data_error = self._safe_data()
+            if data_error:
+                status = 504 if "Zeitlimit" in data_error else 502
+                reason = "timeout" if status == 504 else "upstream-error"
+                match_status = re.search(r"HTTP (\d+)", data_error)
+                if match_status and int(match_status.group(1)) in (401, 403):
+                    reason = "auth"
+                return self._send(status, "Posterquelle derzeit nicht erreichbar.",
+                                  "text/plain; charset=utf-8", {"X-Poster-Reason": reason})
+            try:
+                img = fetch_poster(int(match.group(1)))
+            except PosterFetchError as exc:
+                return self._send(exc.status, str(exc), "text/plain; charset=utf-8",
+                                  {"X-Poster-Reason": exc.reason})
             if img is None:
-                return self._send(404, "kein Poster", "text/plain; charset=utf-8")
-            return self._send_image(*img)
+                return self._send(404, "kein Poster", "text/plain; charset=utf-8", {"X-Poster-Reason": "missing"})
+            return self._send_image(*img, headers={"X-Poster-Reason": "ok"})
+        if not SONARR_URL or not SONARR_API_KEY:
+            return self._send(500, render_error("SONARR_URL und/oder SONARR_API_KEY sind nicht gesetzt."))
         if parsed.path == "/":
             data, err = self._safe_data()
             if err:

@@ -72,6 +72,12 @@ After deployment, check:
 
 Do not use a TVDB ticket submission as a health check.
 
-## Current Phase 1 status
+## Phase 2 status
 
-The Phase 1 backend suite contains 25 tests and the legacy regression suite contains 69 tests. Version `v0.1.0` is published in GHCR after the release workflow completed its checks and Docker build. Phase 1 is accepted. The Phase 1 tests are complete, and the runtime health checks (`/health`, `/api/v1/health`, `/app/`) were confirmed on the deployed `v0.1.0` image.
+Metadatarr now reads the complete Sonarr series, season, and episode inventory, including available series and episode overviews. `ORIGINAL_LANGUAGE` remains visible as a legacy setting but no longer filters imported series. Sonarr text language is never inferred from a series' original language: set `SONARR_METADATA_LANGUAGE` only when the language of text returned by Sonarr is known; otherwise language matching is reported as not checkable.
+
+The API provides read-only inventory endpoints (`GET /api/v1/series` and `GET /api/v1/series/<id>`) and local configuration endpoints for target languages and placeholder rules. CSRF-protected, same-origin `PUT` endpoints update only Metadatarr's SQLite settings; they do not write to Sonarr. Environment-seeded rules remain read-only.
+
+Placeholder rules support empty, exact, or restricted-regex matching for series and episode titles and overviews. Sonarr does not provide season titles or overviews, so those fields are represented as not supplied rather than inferred. Poster fetching supports Sonarr URL Base paths, reports causes through `X-Poster-Reason`, enforces a 6,000,000-byte image limit, and uses a cache bounded to 32 MiB and 400 entries. Only same-origin `MediaCover` paths are accepted; remote artwork URLs are ignored.
+
+Local validation passed: 43 backend `unittest` tests and 71 legacy regression checks. Tests use local fixtures and mocks, not live Sonarr or other services. No release, tag, or image publication was performed. Published `v0.1.0` and test tag `v0.1.1` remain unchanged; `package-lock.json` remains absent.

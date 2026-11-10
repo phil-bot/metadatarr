@@ -1,189 +1,165 @@
-"""tba-tickets – Sonarr-Anbindung: liest Serien und TBA-Folgen (nur lesend)."""
+"""Sonarr-Lesezugriff: vollstaendiger Serien-/Staffel-/Folgenbestand ohne Sprachfilter."""
 import json
+import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime
 import urllib.error
 import urllib.parse
-import re
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime
 from urllib.parse import urlsplit
-from config import CACHE_TTL, INCLUDE_SPECIALS, ORIGINAL_LANGUAGE, SONARR_API_KEY, SONARR_URL, TBA_REGEX
+
+from config import (CACHE_TTL, INCLUDE_SPECIALS, SONARR_API_KEY, SONARR_METADATA_LANGUAGE,
+                    SONARR_URL, TBA_REGEX)
+from core.missing import is_placeholder
+from core.poster_service import (MAX_CACHE_ITEMS, MAX_POSTER_BYTES, POSTER_CACHE,
+                                 PosterFetchError, _request_image, fetch_poster as _fetch_poster)
 from net.http_client import NetworkProfile, SafeHTTPClient
 
 
 STATE = {"data": None, "time": 0.0}
 LOCK = threading.Lock()
-
-
-# ---------------------------------------------------------------------------
-# Sonarr
-# ---------------------------------------------------------------------------
 _HTTP = SafeHTTPClient()
+# Compatibility for the existing server-side settings page; the service enforces the byte limit.
+POSTERS = POSTER_CACHE.items
+POSTER_MAX = MAX_CACHE_ITEMS
+POSTER_BYTES = MAX_POSTER_BYTES
 
 
 def _sonarr_profile(max_bytes=10_000_000):
     host = urlsplit(SONARR_URL).hostname or ""
-    return NetworkProfile(
-        source_id="sonarr",
-        granted_hosts=(host,) if host else (),
-        allow_external=True,
-        allow_private=True,
-        timeout_seconds=30,
-        connect_timeout_seconds=5,
-        max_bytes=max_bytes,
-        min_interval_seconds=0,
-        max_redirects=3,
-    )
+    return NetworkProfile(source_id="sonarr", granted_hosts=(host,) if host else (),
+                          allow_external=True, allow_private=True, timeout_seconds=30,
+                          connect_timeout_seconds=5, max_bytes=max_bytes, min_interval_seconds=0,
+                          max_redirects=3)
 
 
 def sonarr(path, params=None):
-    """Liest Sonarr ausschließlich per GET über den geschützten HTTP-Client."""
+    """Fuehrt ausschliesslich GET-Aufrufe gegen die konfigurierte Sonarr-API aus."""
     url = f"{SONARR_URL}/api/v3/{path}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    response = _HTTP.request(
-        url,
-        profile=_sonarr_profile(),
-        method="GET",
-        headers={
-            "X-Api-Key": SONARR_API_KEY,
-            "Accept": "application/json",
-            "User-Agent": "Metadatarr/1",
-        },
-    )
+    response = _HTTP.request(url, profile=_sonarr_profile(), method="GET",
+                             headers={"X-Api-Key": SONARR_API_KEY, "Accept": "application/json",
+                                      "User-Agent": "Metadatarr/1"})
     if response.status >= 400:
         raise urllib.error.HTTPError(url, response.status, "Sonarr HTTP error", None, None)
     try:
         return json.loads(response.body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        raise ValueError("Sonarr hat ungültiges JSON geliefert.") from None
+        raise ValueError("Sonarr hat ungueltiges JSON geliefert.") from None
 
 
-def poster_path(s):
-    """Relativer Poster-Pfad aus der Sonarr-Serie (z. B. /MediaCover/1/poster.jpg?lastWrite=...) oder leer."""
-    for img in s.get("images") or []:
-        if img.get("coverType") == "poster":
-            url = img.get("url") or ""
-            if re.match(r"^/MediaCover/\d+/[\w.-]+\.(jpg|jpeg|png|webp)(\?[\w=&.:%+-]*)?$", url, re.IGNORECASE):
-                return url
+def poster_path(series):
+    """Liefert nur einen gueltigen lokalen MediaCover-Pfad; remoteUrl wird ignoriert."""
+    from core.poster_service import normalized_media_url
+    for image in series.get("images") or []:
+        if not isinstance(image, dict) or image.get("coverType") != "poster":
+            continue
+        raw = image.get("url") or ""
+        normalized = normalized_media_url(raw, SONARR_URL)
+        if normalized:
+            parts = urlsplit(normalized)
+            return urllib.parse.urlunsplit(("", "", parts.path, parts.query, ""))
     return ""
 
 
-POSTERS = {}  # series_id -> (Bytes, Content-Type); kleiner Zwischenspeicher, damit Sonarr nicht dauernd gefragt wird
-POSTER_MAX = 400
-POSTER_BYTES = 6_000_000
-
-
 def _get_image(path):
-    """Liest ein Bild aus Sonarr mit Body-Limit und ohne Weitergabe des Keys an Fremdhosts."""
-    url = SONARR_URL + path
-    response = _HTTP.request(
-        url,
-        profile=_sonarr_profile(max_bytes=POSTER_BYTES),
-        method="GET",
-        headers={"X-Api-Key": SONARR_API_KEY, "User-Agent": "Metadatarr/1", "Accept": "image/*"},
-    )
-    if response.status >= 400:
-        raise urllib.error.HTTPError(url, response.status, "Sonarr poster HTTP error", None, None)
-    ctype = next((v for k, v in response.headers.items() if k.lower() == "content-type"), "")
-    ctype = ctype.split(";", 1)[0].strip().lower()
-    if not ctype.startswith("image/"):
-        raise ValueError("keine Bilddatei")
-    return response.body, ctype
+    """Kompatibler, streng lesender Einzelbildabruf fuer alte Tests und interne Aufrufer."""
+    from core.poster_service import normalized_media_url
+    url = normalized_media_url(path, SONARR_URL)
+    if not url:
+        raise ValueError("ungueltiger lokaler Sonarr-Posterpfad")
+    return _request_image(_HTTP, url, SONARR_API_KEY, SONARR_URL)
 
 
 def fetch_poster(series_id):
-    """Holt das Poster einer Serie lesend aus Sonarr. Gibt (Bytes, Typ) oder None zurück.
-
-    Es wird nur der in der Serienliste genannte Pfad unter /MediaCover/ abgerufen. Zuerst die kleine Fassung
-    (poster-250.jpg), sonst das Original. Der API-Key verlässt den Server nicht.
-    """
-    if series_id in POSTERS:
-        return POSTERS[series_id]
+    """Liefert (Bytes, MIME-Typ); fehlende oder fehlerhafte Poster werfen PosterFetchError."""
     data = STATE["data"]
-    series = next((s for s in (data or {}).get("series", []) if s["id"] == series_id), None)
-    path = (series or {}).get("poster") or ""
-    if not path:
-        return None
-    base, _, query = path.partition("?")
-    small = re.sub(r"(\.\w+)$", r"-250\1", base)
-    result = None
-    for candidate in (small + ("?" + query if query else ""), path):
-        try:
-            result = _get_image(candidate)
-            break
-        except Exception:  # noqa: BLE001 - fehlendes Poster ist kein Fehler, die Oberfläche zeigt einen Platzhalter
-            continue
-    if result is not None:
-        if len(POSTERS) >= POSTER_MAX:
-            POSTERS.pop(next(iter(POSTERS)))
-        POSTERS[series_id] = result
-    return result
+    series = next((item for item in (data or {}).get("series", []) if item["id"] == series_id), None)
+    return _fetch_poster(series_id, series, base_url=SONARR_URL, api_key=SONARR_API_KEY,
+                         client=_HTTP, cache=POSTER_CACHE)
+
+
+def _episode_record(episode):
+    season = episode.get("seasonNumber", 0)
+    number = episode.get("episodeNumber", 0)
+    return {
+        "id": episode.get("id"),
+        "season": season if isinstance(season, int) else 0,
+        "episode": number if isinstance(number, int) else 0,
+        "title": episode.get("title"),
+        "overview": episode.get("overview"),
+        "provided": {"title": "title" in episode, "overview": "overview" in episode},
+        "airDate": episode.get("airDate"),
+        "hasFile": bool(episode.get("hasFile")),
+        "tvdbId": episode.get("tvdbId"),
+        "monitored": episode.get("monitored"),
+    }
 
 
 def load_all():
-    """Holt Serien und Folgen aus Sonarr und sucht die TBA-Folgen."""
+    """Laedt alle Serien und Folgen per GET; uebernimmt verfuegbare Overviews unveraendert."""
     all_series = sonarr("series")
-    wanted = ORIGINAL_LANGUAGE.strip().lower()
-    selected = [
-        s
-        for s in all_series
-        if wanted == "*"
-        or ((s.get("originalLanguage") or {}).get("name", "").lower() == wanted)
-    ]
+    if not isinstance(all_series, list):
+        raise ValueError("Sonarr hat keine Serienliste geliefert.")
     today = date.today().isoformat()
 
-    def one(s):
-        episodes = sonarr("episode", {"seriesId": s["id"]})
+    def one(source):
+        episodes_raw = sonarr("episode", {"seriesId": source["id"]})
+        if not isinstance(episodes_raw, list):
+            raise ValueError("Sonarr hat keine Folgenliste geliefert.")
+        episodes = [_episode_record(item) for item in episodes_raw]
+        episodes.sort(key=lambda item: (item["season"], item["episode"]))
+        season_numbers = {episode["season"] for episode in episodes}
+        for season in source.get("seasons") or []:
+            if isinstance(season, dict) and isinstance(season.get("seasonNumber"), int):
+                season_numbers.add(season["seasonNumber"])
+        seasons = []
+        for number in sorted(season_numbers):
+            season_episodes = [episode for episode in episodes if episode["season"] == number]
+            # Sonarr liefert keine Staffel-Titel/Overviews; keine Werte erfinden.
+            seasons.append({"seasonNumber": number, "title": None, "overview": None,
+                            "titleProvided": False, "overviewProvided": False,
+                            "episodeCount": len(season_episodes), "episodes": season_episodes})
         tba = []
-        for e in episodes:
-            season = e.get("seasonNumber", 0)
+        for episode in episodes:
+            season = episode["season"]
             if season == 0 and not INCLUDE_SPECIALS:
                 continue
-            if not TBA_REGEX.match(e.get("title") or ""):
+            title = episode.get("title")
+            placeholder = is_placeholder("episode.title", title, SONARR_METADATA_LANGUAGE or None)
+            if not placeholder and not TBA_REGEX.match(title if isinstance(title, str) else ""):
                 continue
-            air = e.get("airDate") or ""
+            air = episode.get("airDate") or ""
             if not air:
                 state = "ohne Datum"
             elif air > today:
-                state = "angekündigt"
+                state = "angekuendigt"
             else:
                 state = "gesendet"
-            tba.append(
-                {
-                    "id": e["id"],
-                    "season": season,
-                    "episode": e.get("episodeNumber", 0),
-                    "title": e.get("title") or "",
-                    "airDate": air,
-                    "state": state,
-                    "hasFile": bool(e.get("hasFile")),
-                }
-            )
-        tba.sort(key=lambda x: (x["season"], x["episode"]))
+            tba.append({"id": episode.get("id"), "season": season,
+                        "episode": episode.get("episode", 0), "title": title or "",
+                        "airDate": air, "state": state, "hasFile": episode["hasFile"]})
+        language = source.get("originalLanguage") or {}
         return {
-            "id": s["id"],
-            "title": s.get("title", "?"),
-            "year": s.get("year"),
-            "network": s.get("network") or "",
-            "status": s.get("status") or "",
-            "tvdbId": s.get("tvdbId"),
-            "slug": s.get("titleSlug") or "",
-            "poster": poster_path(s),
-            "language": (s.get("originalLanguage") or {}).get("name", ""),
-            "episodeCount": len(episodes),
-            "tba": tba,
+            "id": source["id"], "title": source.get("title", "?"), "overview": source.get("overview"),
+            "provided": {"title": "title" in source, "overview": "overview" in source},
+            "year": source.get("year"), "network": source.get("network") or "",
+            "status": source.get("status") or "", "tvdbId": source.get("tvdbId"),
+            "slug": source.get("titleSlug") or "", "poster": poster_path(source),
+            "originalLanguage": language.get("name", "") if isinstance(language, dict) else "",
+            "metadataLanguage": SONARR_METADATA_LANGUAGE or None,
+            "seasons": seasons, "episodeCount": len(episodes), "tba": tba,
         }
 
     with ThreadPoolExecutor(max_workers=6) as pool:
-        series = list(pool.map(one, selected))
-    series.sort(key=lambda x: (-len(x["tba"]), x["title"].lower()))
-    return {
-        "series": series,
-        "seriesTotal": len(all_series),
-        "fetched": datetime.now(),
-    }
+        series = list(pool.map(one, all_series))
+    series.sort(key=lambda item: (-len(item["tba"]), str(item["title"]).lower()))
+    result = {"series": series, "seriesTotal": len(all_series), "fetched": datetime.now()}
+    from core.missing import persist_metadata_snapshots
+    persist_metadata_snapshots(result, SONARR_METADATA_LANGUAGE or None)
+    return result
 
 
 def get_data(force=False):
