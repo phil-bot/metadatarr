@@ -12,7 +12,8 @@ SONARR_URL = os.environ.get("SONARR_URL", "").rstrip("/")
 SONARR_API_KEY = os.environ.get("SONARR_API_KEY", "")
 METADATARR_SECRET_KEY = os.environ.get("METADATARR_SECRET_KEY", "")
 SONARR_PUBLIC_URL = os.environ.get("SONARR_PUBLIC_URL", "").rstrip("/")
-ORIGINAL_LANGUAGE = os.environ.get("ORIGINAL_LANGUAGE", "German")
+ORIGINAL_LANGUAGE = os.environ.get("ORIGINAL_LANGUAGE", "German")  # Legacy display only; never filters imported series.
+SONARR_METADATA_LANGUAGE = os.environ.get("SONARR_METADATA_LANGUAGE", "").strip()  # Empty means language is unknown.
 INCLUDE_SPECIALS = os.environ.get("INCLUDE_SPECIALS", "0") == "1"
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "600"))
 PORT = int(os.environ.get("PORT", "8080"))
@@ -81,7 +82,8 @@ CONFIG_SECTIONS = (
         ("SONARR_URL", "url", "Adresse von Sonarr (aus Sicht des Containers)."),
         ("SONARR_API_KEY", "secret", "API-Key für den lesenden Zugriff."),
         ("SONARR_PUBLIC_URL", "url", "Adresse für den Link „In Sonarr öffnen“."),
-        ("ORIGINAL_LANGUAGE", "text", "Nur Serien dieser Originalsprache; „*“ für alle."),
+        ("ORIGINAL_LANGUAGE", "text", "Veralteter Parameter; filtert den Bestand nicht mehr."),
+        ("SONARR_METADATA_LANGUAGE", "text", "Sprache der Sonarr-Texte; leer bedeutet: Sprachstatus nicht prüfbar."),
         ("INCLUDE_SPECIALS", "bool", "Staffel 0 (Specials) mitprüfen."),
         ("CACHE_TTL", "int", "Sekunden, wie lange die Sonarr-Daten im Speicher bleiben."),
         ("TBA_REGEX", "text", "Muster für Folgentitel, die als TBA gelten."),

@@ -19,6 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 PASS, FAIL = [], []
+SONARR_METHODS = []
 
 
 def check(name, cond, info=""):
@@ -31,15 +32,18 @@ def ts(y, m, d):
     return int(datetime(y, m, d, 12).timestamp())
 
 
-SONARR_SERIES = [{"id": 1, "title": "Testserie", "year": 2020, "network": "ARD", "status": "continuing",
+SONARR_SERIES = [{"id": 1, "title": "Testserie", "overview": "Serienuebersicht", "year": 2020, "network": "ARD", "status": "continuing",
                   "tvdbId": 123, "titleSlug": "testserie", "originalLanguage": {"name": "German"},
                   "images": [{"coverType": "banner", "url": "/MediaCover/1/banner.jpg"},
                              {"coverType": "poster", "url": "/MediaCover/1/poster.jpg?lastWrite=638"}]},
-                 {"id": 2, "title": "Englisch", "year": 2019, "originalLanguage": {"name": "English"}}]
+                 {"id": 2, "title": "Englisch", "overview": "English overview", "year": 2019, "originalLanguage": {"name": "English"},
+                  "seasons": [{"seasonNumber": 1}] }]
 SONARR_EPISODES = {1: [
     {"id": 11, "seasonNumber": 1, "episodeNumber": 1, "title": "TBA", "airDate": "2020-01-05", "hasFile": False},
     {"id": 12, "seasonNumber": 1, "episodeNumber": 2, "title": "TBA", "airDate": "2020-01-12", "hasFile": False},
-    {"id": 13, "seasonNumber": 1, "episodeNumber": 3, "title": "Schon benannt", "airDate": "2020-01-19"},
+    {"id": 13, "seasonNumber": 1, "episodeNumber": 3, "title": "Schon benannt", "overview": "Folgenbeschreibung", "airDate": "2020-01-19"},
+], 2: [
+    {"id": 21, "seasonNumber": 1, "episodeNumber": 1, "title": "English episode", "overview": "English episode overview", "airDate": "2019-01-05", "hasFile": True},
 ]}
 MEDIA_HITS = [
     {"channel": "ARD", "topic": "Testserie", "title": "Testserie (S01/E01) Erste Folge",
@@ -63,6 +67,8 @@ class Fake(BaseHTTPRequestHandler):
 
     def do_GET(self):
         p = urllib.parse.urlparse(self.path)
+        if p.path.startswith("/api/v3/"):
+            SONARR_METHODS.append("GET")
         if self.headers.get("X-Api-Key") != "geheim":
             self.send_response(401); self.end_headers(); return
         if p.path == "/MediaCover/1/poster-250.jpg":
@@ -77,6 +83,8 @@ class Fake(BaseHTTPRequestHandler):
         self.send_response(404); self.end_headers()
 
     def do_POST(self):
+        if urllib.parse.urlparse(self.path).path.startswith("/api/v3/"):
+            SONARR_METHODS.append("POST")
         n = int(self.headers.get("Content-Length") or 0)
         self.rfile.read(n)
         payload = json.loads(self.rfile.read(0) or b"{}")
@@ -244,11 +252,19 @@ check("Startseite zeigt Poster-Adresse", "/poster/1" in b)
 s, _, b = req("GET", "/serien")
 check("Serienseite zeigt Karten mit Filter", s == 200 and "Testserie" in b and "id='serienfilter'" in b and "Englisch" not in b)
 s, _, b = req("GET", "/serien?alle=1")
-check("Alle Serien nur aus gewählter Sprache", s == 200 and "Testserie" in b)
+check("Alle Serien unabhängig von ORIGINAL_LANGUAGE", s == 200 and "Testserie" in b and "Englisch" in b)
+s, h, b = req("GET", "/api/v1/series")
+try:
+    inventory = json.loads(b)
+    english = next(x for x in inventory["series"] if x["id"] == 2)
+    check("JSON-API enthaelt Serien, Staffeln, Folgen und Overviews", s == 200 and english["overview"] == "English overview" and english["seasons"][0]["episodes"][0]["overview"] == "English episode overview")
+    check("Sonarr wurde ausschliesslich per GET angesprochen", bool(SONARR_METHODS) and set(SONARR_METHODS) == {"GET"})
+except Exception as exc:
+    check("JSON-API enthaelt Serien, Staffeln, Folgen und Overviews", False, str(exc))
 s, h, _ = req("GET", "/?alle=1")
 check("Alte Adresse /?alle=1 leitet um", s == 303 and h.get("Location") == "/serien?alle=1", f"status {s}")
 s, h, _ = req("GET", "/poster/1")
-check("Poster kommt über den Server", s == 200 and h.get("Content-Type") == "image/png" and "max-age" in (h.get("Cache-Control") or ""))
+check("Poster kommt über den Server", s == 200 and h.get("Content-Type") == "image/png" and "max-age" in (h.get("Cache-Control") or "") and h.get("X-Poster-Reason") == "ok")
 check("Poster-Antwort ohne API-Key im Kopf", "geheim" not in str(h))
 s, _, _ = req("GET", "/poster/2")
 check("Serie ohne Poster liefert 404", s == 404, f"status {s}")
