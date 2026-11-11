@@ -424,10 +424,14 @@ var e=document.getElementById('serienleer');if(e)e.hidden=n>0;});}
 
 
 def sidebar(active):
-    links = "".join(
-        f"<a class='nav' href='{href}'{' aria-current=\"page\"' if key == active else ''}>{icon(ic)}<span>{label}</span></a>"
-        for key, href, label, ic in NAV
-    )
+    links = []
+    for key, href, label, ic in NAV:
+        aria_current = ' aria-current="page"' if key == active else ""
+        links.append(
+            f"<a class='nav' href='{href}'{aria_current}>"
+            f"{icon(ic)}<span>{label}</span></a>"
+        )
+    links = "".join(links)
     return (
         "<aside class='side' id='side' aria-label='Hauptmenü'>"
         "<a class='brand' href='/'><span class='logo' aria-hidden='true'>T</span>TBA-Tickets</a>"
