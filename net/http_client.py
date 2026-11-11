@@ -6,7 +6,7 @@ import socket
 import ssl
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit
 
 from .redaction import REDACTOR
@@ -43,6 +43,7 @@ class HTTPResult:
     headers: dict
     body: bytes
     url: str
+    session_cookies: tuple = field(default=(), repr=False, compare=False)
 
 
 _METADATA_IPS = tuple(ipaddress.ip_network(item) for item in (
@@ -214,7 +215,7 @@ class SafeHTTPClient:
             self._failures[source_id] = 0
             self._blocked_until.pop(source_id, None)
 
-    def request(self, url, *, profile, method="GET", headers=None, body=None):
+    def request(self, url, *, profile, method="GET", headers=None, body=None, follow_redirects=True):
         method = str(method).upper()
         if method not in {"GET", "POST", "HEAD"}:
             raise NetworkPolicyError("Diese HTTP-Methode ist nicht freigegeben.")
@@ -265,9 +266,16 @@ class SafeHTTPClient:
                             conn.sock.settimeout(min(connect_timeout, max(0.1, deadline - time.monotonic())))
                         response = conn.getresponse()
                         status = response.status
-                        response_headers = dict(response.getheaders())
+                        raw_header_pairs = response.getheaders()
+                        response_headers = dict(raw_header_pairs)
+                        session_cookies = tuple(value for key, value in raw_header_pairs if key.lower() == "set-cookie")
                         location = next((v for k, v in response_headers.items() if k.lower() == "location"), "")
                         if status in _REDIRECTS and location:
+                            if not follow_redirects:
+                                result = HTTPResult(status, REDACTOR.redact_headers(response_headers), b"",
+                                                    REDACTOR.redact_text(current_url), session_cookies)
+                                self._note_result(profile.source_id, status=status)
+                                return result
                             if redirect_count >= max_redirects:
                                 raise HTTPClientError("Zu viele Weiterleitungen.")
                             next_url = urljoin(current_url, location)
@@ -307,7 +315,8 @@ class SafeHTTPClient:
                             total += len(chunk)
                             if total > max_bytes:
                                 raise ResponseTooLarge("Antwort überschreitet das Quellenlimit.")
-                        result = HTTPResult(status, REDACTOR.redact_headers(response_headers), b"".join(chunks), REDACTOR.redact_text(current_url))
+                        result = HTTPResult(status, REDACTOR.redact_headers(response_headers), b"".join(chunks),
+                                            REDACTOR.redact_text(current_url), session_cookies)
                         self._note_result(profile.source_id, status=status)
                         return result
                     finally:
@@ -326,3 +335,44 @@ class SafeHTTPClient:
 
 
 HTTPClient = SafeHTTPClient
+
+
+class SafeHTTPSession:
+    """Small cookie session restricted to one origin and backed by SafeHTTPClient."""
+
+    def __init__(self, client, profile, base_url):
+        from http.cookies import SimpleCookie
+        self.client = client
+        self.profile = profile
+        self.base_origin = self._origin(base_url)
+        self.cookies = {}
+        self._cookie_parser = SimpleCookie
+
+    @staticmethod
+    def _origin(url):
+        parsed = urlsplit(url)
+        scheme = parsed.scheme.lower()
+        host = _normalized_host(parsed.hostname)
+        port = parsed.port or (443 if scheme == "https" else 80)
+        return scheme, host, port
+
+    def request(self, url, *, method="GET", headers=None, body=None):
+        from http.cookies import SimpleCookie
+        request_headers = dict(headers or {})
+        if self._origin(url) == self.base_origin and self.cookies:
+            request_headers["Cookie"] = "; ".join(f"{key}={value}" for key, value in sorted(self.cookies.items()))
+        result = self.client.request(url, profile=self.profile, method=method, headers=request_headers,
+                                     body=body, follow_redirects=False)
+        if self._origin(url) == self.base_origin:
+            for header in result.session_cookies:
+                jar = SimpleCookie()
+                try:
+                    jar.load(header)
+                except Exception:
+                    continue
+                for key, morsel in jar.items():
+                    if morsel["max-age"] == "0" or not morsel.value:
+                        self.cookies.pop(key, None)
+                    else:
+                        self.cookies[key] = morsel.value
+        return result

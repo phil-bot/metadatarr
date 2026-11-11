@@ -5,6 +5,7 @@ import os
 import sqlite3
 import threading
 import time
+from urllib.parse import urlsplit
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -104,15 +105,13 @@ def _ensure_legacy_schema(con):
         "UNIQUE (series_id, season, episode, source, source_key))"
     )
     _add_column(con, "suggestion", "hint", "TEXT NOT NULL DEFAULT ''")
-    marked_added = "marked" not in _columns(con, "suggestion")
+    # Altbestand-Statuswerte werden nicht umgeschrieben. Die Projektion auf den
+    # engeren candidate_state erfolgt separat; der Originalstatus bleibt erhalten.
     _add_column(con, "suggestion", "marked", "INTEGER NOT NULL DEFAULT 0")
     _add_column(con, "suggestion", "edited", "INTEGER NOT NULL DEFAULT 0")
     _add_column(con, "suggestion", "orig_title_de", "TEXT NOT NULL DEFAULT ''")
     _add_column(con, "suggestion", "orig_title_en", "TEXT NOT NULL DEFAULT ''")
     _add_column(con, "suggestion", "orig_description", "TEXT NOT NULL DEFAULT ''")
-    if marked_added:
-        con.execute("UPDATE suggestion SET marked=1, status='offen' WHERE status='ausgewählt'")
-        con.execute("UPDATE suggestion SET status='verworfen' WHERE status='eingereicht'")
 
     con.execute(
         "CREATE TABLE IF NOT EXISTS ticket ("
@@ -212,10 +211,12 @@ def _backfill_legacy(con, now):
                  values["source"], values.get("link") or "", values.get("created"), values.get("level") or "",
                  hint, values["id"], values.get("created") or now),
             )
-            status = "verworfen" if values.get("status") == "verworfen" else "offen"
+            legacy_status = values.get("status") or ""
+            status = "verworfen" if legacy_status in ("verworfen", "eingereicht") else "offen"
+            marked = bool(values.get("marked")) or legacy_status == "ausgewählt"
             con.execute(
                 "INSERT INTO candidate_state(candidate_id,status,marked,created_at,updated_at) VALUES(?,?,?,?,?)",
-                (cur.lastrowid, status, int(bool(values.get("marked"))), values.get("created") or now, now),
+                (cur.lastrowid, status, int(marked), values.get("created") or now, now),
             )
     tickets = con.execute("SELECT id,status,created,updated,tvdb_no,tvdb_status FROM ticket ORDER BY id").fetchall()
     for row in tickets:
@@ -228,7 +229,7 @@ def _backfill_legacy(con, now):
 
 
 def migrate_database(db_path, backup_func=None):
-    """Migriert additiv auf Version 1; bei Backup- oder Schemafehlern wird zurückgerollt."""
+    """Wendet die Basismigration an und verifiziert vorhandene Versionen 1 und 2."""
     db_path = os.path.abspath(os.fspath(db_path))
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     with DB_LOCK:
@@ -237,14 +238,18 @@ def migrate_database(db_path, backup_func=None):
         con.row_factory = sqlite3.Row
         try:
             version = con.execute("PRAGMA user_version").fetchone()[0]
-            if version > TARGET_VERSION:
+            if version > 2:
                 raise MigrationError("Datenbankversion ist neuer als diese Anwendung; Start abgebrochen.")
-            if version == TARGET_VERSION:
+            if version in (1, 2):
                 if "schema_migration" not in _tables(con):
                     raise MigrationError("Datenbankversion und Migrationsprotokoll widersprechen sich.")
-                recorded = con.execute("SELECT checksum FROM schema_migration WHERE version=?", (TARGET_VERSION,)).fetchone()
+                recorded = con.execute("SELECT checksum FROM schema_migration WHERE version=1").fetchone()
                 if recorded is None or recorded[0] != _MIGRATION_CHECKSUM:
                     raise MigrationError("Migrationsprotokoll fehlt oder Prüfsumme stimmt nicht.")
+                if version == 2:
+                    phase3 = con.execute("SELECT checksum FROM schema_migration WHERE version=2").fetchone()
+                    if phase3 is None or phase3[0] != _PHASE3_CHECKSUM:
+                        raise MigrationError("Phase-3-Migrationsprotokoll fehlt oder Prüfsumme stimmt nicht.")
                 return None
             if existed and _tables(con):
                 creator = backup_func or _create_backup
@@ -271,5 +276,155 @@ def migrate_database(db_path, backup_func=None):
                     raise
                 raise MigrationError("Migration fehlgeschlagen; Änderungen wurden zurückgerollt.") from None
             return TARGET_VERSION
+        finally:
+            con.close()
+
+
+_PHASE3_TEXT = b"metadatarr schema v2: candidates provenance, source/action defaults, preview ledger"
+_PHASE3_CHECKSUM = hashlib.sha256(_PHASE3_TEXT).hexdigest()
+
+
+def _configured_host(url, fallback):
+    try:
+        return (urlsplit(url).hostname or fallback).lower().rstrip(".")
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _backfill_phase3_candidates(con, now):
+    """Idempotently copy suggestions added after the base migration into candidates."""
+    fields = (("title_de", "episode.title", "de"), ("title_en", "episode.title", "en"),
+              ("description", "episode.overview", "de"))
+    rows = con.execute("SELECT * FROM suggestion ORDER BY id").fetchall()
+    for row in rows:
+        values = dict(row)
+        for column, field_key, language in fields:
+            value = (values.get(column) or "").strip()
+            if not value:
+                continue
+            hint = "Aus Altbestand; Beschreibungssprache Deutsch angenommen." if column == "description" else "Aus Altbestand."
+            if values.get("hint"):
+                hint += " " + str(values["hint"])
+            con.execute(
+                "INSERT OR IGNORE INTO candidate_value(series_id,season,episode,field_key,language,value,source_id,"
+                "source_url,retrieved_at,match_level,match_hint,suggestion_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (values["series_id"], values["season"], values["episode"], field_key, language, value,
+                 values["source"], values.get("link") or "", values.get("created"), values.get("level") or "",
+                 hint, values["id"], values.get("created") or now),
+            )
+            candidate = con.execute(
+                "SELECT id FROM candidate_value WHERE suggestion_id=? AND field_key=? AND language=?",
+                (values["id"], field_key, language),
+            ).fetchone()
+            if candidate:
+                legacy_status = values.get("status") or ""
+                normalized = "verworfen" if legacy_status in ("verworfen", "eingereicht") else "offen"
+                marked = int(bool(values.get("marked")) or legacy_status == "ausgew\u00e4hlt")
+                con.execute(
+                    "INSERT OR IGNORE INTO candidate_state(candidate_id,status,marked,created_at,updated_at,legacy_status) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (candidate[0], normalized, marked, values.get("created") or now, now, legacy_status),
+                )
+                con.execute("UPDATE candidate_state SET legacy_status=? WHERE candidate_id=? AND legacy_status=''",
+                            (legacy_status, candidate[0]))
+    tickets = con.execute("SELECT id,status,created,updated,tvdb_no,tvdb_status FROM ticket ORDER BY id").fetchall()
+    for ticket in tickets:
+        if con.execute("SELECT 1 FROM ticket_status_event WHERE ticket_id=? LIMIT 1", (ticket["id"],)).fetchone():
+            continue
+        detail = json.dumps({"tvdbNumber": ticket["tvdb_no"], "tvdbStatus": ticket["tvdb_status"] or ""}, separators=(",", ":"))
+        con.execute("INSERT INTO ticket_status_event(ticket_id,status,occurred_at,event_source,details_json) VALUES(?,?,?,?,?)",
+                    (ticket["id"], ticket["status"] or "erstellt", ticket["updated"] or ticket["created"] or now,
+                     "phase3-backfill", detail))
+
+
+def _apply_phase3_schema(con, now):
+    """Additive Phase-3-Erweiterungen; keine Altbestandstabelle wird umgebaut."""
+    _add_column(con, "candidate_value", "machine_translated", "INTEGER NOT NULL DEFAULT 0")
+    _add_column(con, "candidate_value", "derived_from_id", "INTEGER")
+    _add_column(con, "candidate_state", "legacy_status", "TEXT NOT NULL DEFAULT ''")
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS action_preview ("
+        "id TEXT PRIMARY KEY, plugin_key TEXT NOT NULL, entity_kind TEXT NOT NULL, entity_id TEXT NOT NULL, "
+        "preview_hash TEXT NOT NULL, snapshot_json TEXT NOT NULL, created_at REAL NOT NULL, expires_at REAL NOT NULL, consumed_at REAL)"
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS ix_action_preview_expiry ON action_preview(expires_at,consumed_at)"
+    )
+    con.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_candidate_derived_origin "
+        "ON candidate_value(derived_from_id,field_key,language,value) WHERE derived_from_id IS NOT NULL"
+    )
+    # Save the exact source status separately from the normalized candidate state.
+    _backfill_phase3_candidates(con, now)
+    con.execute(
+        "UPDATE candidate_state SET legacy_status=COALESCE((SELECT status FROM suggestion s "
+        "JOIN candidate_value c ON c.suggestion_id=s.id WHERE c.id=candidate_state.candidate_id), '') "
+        "WHERE legacy_status=''"
+    )
+    from config import DEEPL_API_KEY, DEEPL_API_URL, MEDIA_API_URL, TMDB_API_URL, TVDB_USER, TVDB_PASSWORD
+    from config import TVDB_BASE_URL
+    defaults = {
+        "mediathek": (_configured_host(MEDIA_API_URL, "mediathekviewweb.de"),),
+        "tmdb": (_configured_host(TMDB_API_URL, "api.themoviedb.org"),),
+        "fernsehserien": ("www.fernsehserien.de",),
+        "deepl": (_configured_host(DEEPL_API_URL, "api-free.deepl.com"),),
+    }
+    for source_id, hosts in defaults.items():
+        row = con.execute("SELECT granted_hosts_json FROM source_config WHERE id=?", (source_id,)).fetchone()
+        if row is None:
+            continue
+        try:
+            current = json.loads(row[0] or "[]")
+        except (TypeError, ValueError):
+            current = []
+        if not current:
+            con.execute(
+                "UPDATE source_config SET granted_hosts_json=?,allow_external=1,updated_at=? WHERE id=?",
+                (json.dumps(list(hosts)), now, source_id),
+            )
+    con.execute("UPDATE source_config SET enabled=0,include_in_nightly=0,updated_at=? WHERE id='fernsehserien'", (now,))
+    if DEEPL_API_KEY:
+        con.execute("UPDATE source_config SET enabled=1,include_in_nightly=0,updated_at=? WHERE id='deepl'", (now,))
+    else:
+        con.execute("UPDATE source_config SET enabled=0,include_in_nightly=0,updated_at=? WHERE id='deepl'", (now,))
+    ready = int(bool(TVDB_USER and TVDB_PASSWORD))
+    con.execute("UPDATE action_config SET enabled=?,updated_at=? WHERE plugin_key='tvdb-ticket'", (ready, now))
+    con.execute(
+        "INSERT INTO schema_migration(version,applied_at,description,checksum) VALUES(2,?,?,?)",
+        (now, "Phase-3-Kandidatenherkunft und Aktionsvorschauen", _PHASE3_CHECKSUM),
+    )
+    con.execute("PRAGMA user_version=2")
+
+
+def migrate_phase3_database(db_path, backup_func=None):
+    """Migriert v1->v2 mit verifizierter Vorab-Sicherung, Transaktion und wiederholbarer Pruefung."""
+    db_path = os.path.abspath(os.fspath(db_path))
+    with DB_LOCK:
+        if not os.path.isfile(db_path) or os.path.getsize(db_path) == 0:
+            raise MigrationError("Phase-3-Migration benoetigt zuerst die Basis-Migration.")
+        con = sqlite3.connect(db_path, timeout=10)
+        con.row_factory = sqlite3.Row
+        try:
+            version = con.execute("PRAGMA user_version").fetchone()[0]
+            if version == 2:
+                row = con.execute("SELECT checksum FROM schema_migration WHERE version=2").fetchone()
+                if row is None or row[0] != _PHASE3_CHECKSUM:
+                    raise MigrationError("Phase-3-Migrationsprotokoll fehlt oder Pruefsumme stimmt nicht.")
+                return None
+            if version != 1:
+                raise MigrationError("Unerwartete Datenbankversion fuer Phase 3.")
+            creator = backup_func or _create_backup
+            try:
+                creator(db_path, version)
+            except Exception:
+                raise MigrationError("Vorab-Sicherung fehlgeschlagen; Phase-3-Migration abgebrochen.") from None
+            try:
+                con.execute("BEGIN IMMEDIATE")
+                _apply_phase3_schema(con, time.time())
+                con.commit()
+            except Exception:
+                con.rollback()
+                raise MigrationError("Phase-3-Migration fehlgeschlagen; Aenderungen wurden zurueckgerollt.") from None
+            return 2
         finally:
             con.close()

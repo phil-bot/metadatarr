@@ -1,15 +1,11 @@
 """tba-tickets – TVDB-Tickets: Text, Übersetzung (DeepL), Einreichen bei TVDB, Status, Bericht."""
 import csv
-import hashlib
 import html as htmllib
 import io
 import json
 import threading
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
-from config import DEEPL_API_KEY, DEEPL_API_URL, TVDB_BASE_URL, TVDB_PASSWORD, TVDB_USER, USER_AGENT
+from config import TVDB_BASE_URL, TVDB_PASSWORD, TVDB_USER
 from quellen import PLACEHOLDER_EN, tmdb_get
 from speicher import cache_get_raw, cache_put, db_exec, db_insert
 from tvdb import TvdbError, statuses, submit_ticket
@@ -21,37 +17,9 @@ SUBMIT_LOCK = threading.Lock()  # verhindert doppeltes Einreichen durch Doppelkl
 
 
 def deepl_translate(text, source="DE", target="EN-US"):
-    """Übersetzt über DeepL (Standard: Deutsch nach Englisch). Ergebnis wird dauerhaft zwischengespeichert.
-
-    Gibt None zurück, wenn kein Schlüssel gesetzt ist oder DeepL nicht antwortet. Der Schlüssel steht nur
-    im Header (DeepL-Auth-Key), nie in der Adresse und nie in einer Meldung.
-    """
-    text = (text or "").strip()
-    if not text:
-        return ""
-    if not DEEPL_API_KEY:
-        return None
-    ckey = f"deepl:{source[:2].lower()}>{target[:2].lower()}:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
-    cached = cache_get_raw(ckey)
-    if cached is not None:
-        return cached
-    body = urllib.parse.urlencode({"text": text, "source_lang": source, "target_lang": target}).encode("utf-8")
-    req = urllib.request.Request(
-        DEEPL_API_URL,
-        data=body,
-        headers={
-            "Authorization": f"DeepL-Auth-Key {DEEPL_API_KEY}",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": USER_AGENT,
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            out = json.load(resp)["translations"][0]["text"]
-    except Exception:  # noqa: BLE001 - Fehlerdetails könnten Teile der Anfrage enthalten
-        return None
-    cache_put(ckey, out)
-    return out
+    """Use DeepL through its protected source-plugin transport."""
+    from plugins.sources import translate_deepl
+    return translate_deepl(text, source=source, target=target)
 
 
 LANG_NAME = {"de": "Deutsch", "en": "Englisch"}
@@ -130,6 +98,8 @@ def create_ticket(s, season, lang):
             (tid, r["id"], season, ep, title),
         )
         db_exec("UPDATE suggestion SET marked = 0 WHERE id = ?", (r["id"],))
+    from core.candidates import sync_candidate_states
+    sync_candidate_states(series_id=sid, season=season)
     return tid, f"Entwurf {ticket_label({'id': tid, 'tvdb_no': None})} ({LANG_NAME[lang]}) mit {len(picked)} Folge(n) erstellt."
 
 
@@ -147,27 +117,11 @@ def ticket_status(tid, aktion):
 
 
 def ticket_submit(tid):
-    """Reicht ein erstelltes Ticket bei TVDB ein und speichert die TVDB-Ticketnummer.
-    Gibt (Erfolg, Meldung) zurück. Die Meldung enthält keine Zugangsdaten."""
-    with SUBMIT_LOCK:
-        rows = db_exec("SELECT * FROM ticket WHERE id = ?", (tid,), fetch=True)
-        if not rows:
-            return False, "Ticket nicht gefunden."
-        t = rows[0]
-        if t["tvdb_no"]:
-            return False, "Dieses Ticket ist schon bei TVDB eingereicht."
-        summary, _ = ticket_summary(t["series_title"], t["season"], t["lang"])
-        try:
-            no = submit_ticket(summary, t["body_html"] or html_text(t["body"]))
-        except TvdbError as exc:
-            return False, str(exc)
-        now = time.time()
-        db_exec(
-            "UPDATE ticket SET status = 'eingereicht', tvdb_no = ?, tvdb_status = 'Open', tvdb_checked = ?, "
-            "updated = ? WHERE id = ?",
-            (no, now, now, tid),
-        )
-        return True, f"Bei TVDB eingereicht: Ticket {no}. Status: Open."
+    """Legacy HTML route is non-writing; external submission uses the guarded JSON action API."""
+    if not db_exec("SELECT id FROM ticket WHERE id=?", (tid,), fetch=True):
+        return False, "Ticket nicht gefunden."
+    return False, ("Externe Einreichung ist gesperrt. Verwenden Sie die serverseitige Vorschau, "
+                   "ausdrueckliche Bestaetigung und Idempotenz-API.")
 
 
 def ticket_refresh_one(tid):
@@ -248,6 +202,25 @@ def html_text(text):
     return htmllib.escape(text or "").replace("\n", "<br>")
 
 
+def _record_translation(r, source_field, source_language, target_language, value):
+    if not value:
+        return
+    try:
+        suggestion_id = r["id"]
+    except (KeyError, IndexError, TypeError):
+        return
+    from core.candidates import record_translation_for_suggestion
+    record_translation_for_suggestion(suggestion_id, source_field, source_language, target_language, value)
+
+
+def _record_external_translation_origin(series_id, season, episode, row, value):
+    from core.candidates import record_source_value
+    return record_source_value(series_id=series_id, season=season, episode=episode,
+                               field_key="episode.overview", language="en", value=value,
+                               source_id="tmdb", source_url=row["link"] or "",
+                               match_hint="TMDB en-US Originalwert fuer DeepL-Uebersetzung")
+
+
 def ticket_build(s, season, rows, lang):
     """Ticket für TheTVDB nach der Vorlage „Translations“: Betreff, Body mit „Many thanks in advance“, dem
     Serienlink und je Folge „#Nummer“, Titel und Overview, in Sendereihenfolge. Ohne Sendedatum.
@@ -274,8 +247,17 @@ def ticket_build(s, season, rows, lang):
             en_clean = clean_title(raw)
             if en_clean and en_clean == de_title:
                 en_clean = ""  # Deutscher Titel als EN-Platzhalter (alte Suchregel): nicht übernehmen
-            title = en_clean or clean_title(deepl_translate(de_title) or "")
-            over = deepl_translate((r["description"] or "").strip()) if (r["description"] or "").strip() else ""
+            if en_clean:
+                title = en_clean
+            else:
+                translated_title = deepl_translate(de_title)
+                title = clean_title(translated_title or "")
+                if translated_title:
+                    _record_translation(r, "title_de", "de", "en", translated_title)
+            source_overview = (r["description"] or "").strip()
+            over = deepl_translate(source_overview) if source_overview else ""
+            if over and source_overview:
+                _record_translation(r, "description", "de", "en", over)
             over = over or tmdb_overview_en(r)
             if not over and (r["description"] or "").strip():
                 hints.append(("warn", f"#{ep}: Englische Overview nicht möglich (DeepL nicht verfügbar)."))
@@ -287,6 +269,10 @@ def ticket_build(s, season, rows, lang):
                 if en_text:
                     over = deepl_translate(en_text, source="EN", target="DE") or ""
                     if over:
+                        origin_id = _record_external_translation_origin(s.get("id", r["series_id"]), season, ep, r, en_text)
+                        if origin_id:
+                            from core.candidates import record_translation
+                            record_translation(origin_id, over, "de")
                         hints.append(("info", f"#{ep}: Overview aus der englischen TMDB-Fassung maschinell übersetzt. Bitte prüfen."))
                     else:
                         hints.append(("warn", f"#{ep}: Nur englische Overview vorhanden, DeepL-Übersetzung nicht möglich."))
@@ -362,12 +348,8 @@ def tvdb_block(t):
     if t["tvdb_no"]:
         return ""
     if TVDB_USER and TVDB_PASSWORD:
-        inhalt = (
-            f"<form method='post' action='/ticket/{t['id']}/einreichen' "
-            "onsubmit=\"return confirm('Ticket jetzt bei TVDB einreichen?')\">"
-            "<button class='btn pri block'>Bei TVDB einreichen</button></form>"
-            "<p class='small mut'>Das Einreichen dauert bis zu einer halben Minute. Danach übernimmt das Ticket die TVDB-Nummer.</p>"
-        )
+        inhalt = ("<p class='small mut'>Externe Einreichung nur ueber die JSON-API mit serverseitiger Vorschau, "
+                  "ausdruecklicher Bestaetigung und Idempotenzschutz. Die manuelle Ticketvorlage bleibt nutzbar.</p>")
     else:
         inhalt = ("<p class='small mut'>Automatisches Einreichen ist nicht eingerichtet: "
                   "TVDB_USER und TVDB_PASSWORD fehlen in der .env.</p>")

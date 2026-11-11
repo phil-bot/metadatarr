@@ -7,10 +7,10 @@ import threading
 import time
 import unicodedata
 from datetime import date, datetime
-import urllib.error
 import urllib.parse
-import urllib.request
+from urllib.parse import urlsplit
 from config import FS_PAUSE, MAX_TMDB_SEASONS, MEDIA_API_URL, MEDIA_MAX_PAGES, MEDIA_PAUSE, TMDB_API_KEY, TMDB_API_URL, TMDB_PAUSE, USER_AGENT
+from net.http_client import HTTPClientError, NetworkProfile, SafeHTTPClient
 from speicher import cache_get, cache_put
 
 
@@ -19,27 +19,64 @@ FS_BASE = "https://www.fernsehserien.de"
 AUDIO_DESC = re.compile(r"audiodeskription", re.IGNORECASE)
 SE_TITLE = re.compile(r"\(S(\d+)\s*/\s*E(\d+)\)", re.IGNORECASE)
 NET = {"lock": threading.Lock(), "last": 0.0}
+SAFE_HTTP = SafeHTTPClient()
+DEFAULT_SOURCE_HOSTS = {
+    "mediathek": ("mediathekviewweb.de",),
+    "tmdb": ("api.themoviedb.org",),
+    "fernsehserien": ("www.fernsehserien.de",),
+    "deepl": ("api-free.deepl.com", "api.deepl.com"),
+}
+
+
+class SourceHTTPError(HTTPClientError):
+    def __init__(self, status):
+        self.status = int(status)
+        super().__init__(f"Quellenserver antwortet mit HTTP {self.status}.")
+
+
+def source_network_profile(source_id, url, pause=0.0, max_bytes=2_000_000):
+    """Construct a strict profile from the source's persisted host grants."""
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    hosts = DEFAULT_SOURCE_HOSTS.get(source_id, ())
+    allow_external, allow_private = True, False
+    try:
+        from speicher import db_exec
+        rows = db_exec("SELECT granted_hosts_json,allow_external,allow_private FROM source_config WHERE id=?",
+                       (source_id,), fetch=True)
+        if rows:
+            import json as _json
+            saved = _json.loads(rows[0]["granted_hosts_json"] or "[]")
+            hosts = tuple(saved)
+            allow_external = bool(rows[0]["allow_external"])
+            allow_private = bool(rows[0]["allow_private"])
+    except Exception:
+        pass
+    return NetworkProfile(source_id=source_id, granted_hosts=tuple(hosts), allow_external=allow_external,
+                          allow_private=allow_private, timeout_seconds=20, connect_timeout_seconds=5,
+                          max_bytes=max_bytes, min_interval_seconds=max(0.0, float(pause)), max_redirects=3)
 
 
 def polite_wait(pause):
-    """Mindestabstand zwischen zwei Anfragen an externe Dienste, über alle Threads hinweg."""
-    with NET["lock"]:
-        wait = NET["last"] + pause - time.monotonic()
-        if wait > 0:
-            time.sleep(wait)
-        NET["last"] = time.monotonic()
+    """Legacy no-op: SafeHTTPClient enforces the per-host rate interval."""
+    return None
 
 
-def http_json(url, data=None, headers=None, pause=0.0):
-    polite_wait(pause)
+def http_json(url, data=None, headers=None, pause=0.0, source_id="mediathek", http=None):
+    client = http or SAFE_HTTP
     hdrs = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     hdrs.update(headers or {})
-    req = urllib.request.Request(url, data=data, headers=hdrs)
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.load(resp)
+    profile = source_network_profile(source_id, url, pause=pause)
+    result = client.request(url, profile=profile, method="POST" if data is not None else "GET",
+                            headers=hdrs, body=data)
+    if result.status < 200 or result.status >= 300:
+        raise SourceHTTPError(result.status)
+    try:
+        return json.loads(result.body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise RuntimeError("Quellenantwort enthaelt kein gueltiges JSON.") from None
 
 
-def media_search(title, force=False):
+def media_search(title, force=False, http=None):
     """Sucht in MediathekViewWeb nach dem Sendungsnamen (Feld topic). Antwort wird zwischengespeichert.
 
     Hinweis: Das API-Format stammt aus Erinnerung und ist nicht verifiziert (HANDOFF, Punkt 2.2).
@@ -63,7 +100,7 @@ def media_search(title, force=False):
             MEDIA_API_URL,
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "text/plain"},
-            pause=MEDIA_PAUSE,
+            pause=MEDIA_PAUSE, source_id="mediathek", http=http,
         )
         items = ((resp or {}).get("result") or {}).get("results") or []
         results.extend(items)
@@ -85,20 +122,21 @@ def media_search(title, force=False):
     return slim
 
 
-def tmdb_get(path, params, lang, force=False):
+def tmdb_get(path, params, lang, force=False, http=None, api_key=None):
     """TMDB-Abfrage mit Zwischenspeicher. Der API-Key erscheint nie in Fehlermeldungen."""
     ckey = f"tmdb:{lang}:{path}:{urllib.parse.urlencode(sorted(params.items()))}"
     cached = None if force else cache_get(ckey)
     if cached is not None:
         return cached
-    if not TMDB_API_KEY:
+    key = api_key or TMDB_API_KEY
+    if not key:
         raise RuntimeError("TMDB_API_KEY ist nicht gesetzt.")
-    query = dict(params, language=lang, api_key=TMDB_API_KEY)
+    query = dict(params, language=lang, api_key=key)
     url = f"{TMDB_API_URL}{path}?{urllib.parse.urlencode(query)}"
     try:
-        body = http_json(url, pause=TMDB_PAUSE)
+        body = http_json(url, pause=TMDB_PAUSE, source_id="tmdb", http=http)
     except Exception as exc:  # noqa: BLE001 - Schlüssel aus der Meldung entfernen
-        text = str(exc).replace(TMDB_API_KEY, "***")
+        text = str(exc).replace(key, "***")
         raise RuntimeError(f"TMDB-Fehler: {type(exc).__name__}: {text}") from None
     cache_put(ckey, body)
     return body
@@ -119,8 +157,8 @@ def parse_day(text):
         return None
 
 
-def tmdb_find_series(series, force=False):
-    res = tmdb_get("/search/tv", {"query": series["title"]}, "de-DE", force)
+def tmdb_find_series(series, force=False, http=None, api_key=None):
+    res = tmdb_get("/search/tv", {"query": series["title"]}, "de-DE", force, http, api_key)
     best, best_score = None, 0.0
     for r in (res.get("results") or [])[:10]:
         score = max(similar(series["title"], r.get("name")), similar(series["title"], r.get("original_name")))
@@ -131,15 +169,15 @@ def tmdb_find_series(series, force=False):
     return best if best is not None and best_score >= 0.8 else None
 
 
-def tmdb_episodes(tmdb_id, force=False, only_season=None):
-    show = tmdb_get(f"/tv/{tmdb_id}", {}, "de-DE", force)
+def tmdb_episodes(tmdb_id, force=False, only_season=None, http=None, api_key=None):
+    show = tmdb_get(f"/tv/{tmdb_id}", {}, "de-DE", force, http, api_key)
     seasons = min(int(show.get("number_of_seasons") or 0), MAX_TMDB_SEASONS)
     numbers = [only_season] if only_season is not None else range(1, seasons + 1)
     episodes = []
     for n in numbers:
         try:
-            de = tmdb_get(f"/tv/{tmdb_id}/season/{n}", {}, "de-DE", force)
-            en = tmdb_get(f"/tv/{tmdb_id}/season/{n}", {}, "en-US", force)
+            de = tmdb_get(f"/tv/{tmdb_id}/season/{n}", {}, "de-DE", force, http, api_key)
+            en = tmdb_get(f"/tv/{tmdb_id}/season/{n}", {}, "en-US", force, http, api_key)
         except RuntimeError as exc:
             if "404" in str(exc):
                 continue
@@ -270,11 +308,13 @@ def match_tmdb(eps, tmdb_eps, tmdb_id, german=False):
     return rows
 
 
-def http_text(url, pause=0.0):
-    polite_wait(pause)
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.read().decode("utf-8", "replace")
+def http_text(url, pause=0.0, http=None, source_id="fernsehserien"):
+    client = http or SAFE_HTTP
+    profile = source_network_profile(source_id, url, pause=pause, max_bytes=2_000_000)
+    result = client.request(url, profile=profile, headers={"User-Agent": USER_AGENT, "Accept": "text/html"})
+    if result.status < 200 or result.status >= 300:
+        raise SourceHTTPError(result.status)
+    return result.body.decode("utf-8", "replace")
 
 
 def slugify(title):
@@ -338,7 +378,7 @@ def parse_fs_episodes(raw):
     return list(unique.values())
 
 
-def fs_season_ids(series, force=False):
+def fs_season_ids(series, force=False, http=None):
     """Liest die Staffel-Kennungen aus der Episodenübersicht. Gibt (Kennungen, Hinweis) zurück."""
     slug = slugify(series["title"])
     key = f"fs:index:{slug}"
@@ -346,9 +386,9 @@ def fs_season_ids(series, force=False):
     if cached is not None:
         return {int(n): int(sid) for n, sid in cached}, ""
     try:
-        raw = http_text(f"{FS_BASE}/{slug}/episodenguide", pause=FS_PAUSE)
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
+        raw = http_text(f"{FS_BASE}/{slug}/episodenguide", pause=FS_PAUSE, http=http)
+    except SourceHTTPError as exc:
+        if exc.status == 404:
             return {}, f"fernsehserien.de: keine Seite unter „{slug}“ (404). Bitte von Hand prüfen."
         raise
     if norm(series["title"]) not in norm(" ".join(html_to_lines(raw))):
@@ -361,12 +401,12 @@ def fs_season_ids(series, force=False):
     return dict(ids), ""
 
 
-def fs_season_records(slug, n, sid, force=False):
+def fs_season_records(slug, n, sid, force=False, http=None):
     key = f"fs:{slug}:{n}:{sid}"
     cached = None if force else cache_get(key)
     if cached is not None:
         return cached
-    records = parse_fs_episodes(http_text(f"{FS_BASE}/{slug}/episodenguide/staffel-{n}/{sid}", pause=FS_PAUSE))
+    records = parse_fs_episodes(http_text(f"{FS_BASE}/{slug}/episodenguide/staffel-{n}/{sid}", pause=FS_PAUSE, http=http))
     if records:
         cache_put(key, records)
     return records
@@ -402,18 +442,18 @@ def match_dated(eps, items, source, link_of):
     return rows
 
 
-def fs_rows(series, eps, force=False):
+def fs_rows(series, eps, force=False, http=None):
     """Vorschläge von fernsehserien.de. Gibt (Zeilen, Hinweis) zurück. Fehler werden zum Hinweis, nicht zum Abbruch."""
     slug = slugify(series["title"])
     try:
-        ids, note = fs_season_ids(series, force)
+        ids, note = fs_season_ids(series, force, http)
         if note:
             return [], note
         items = []
         for n in sorted({e["season"] for e in eps}):
             if n not in ids:
                 continue
-            for r in fs_season_records(slug, n, ids[n], force):
+            for r in fs_season_records(slug, n, ids[n], force, http):
                 items.append({
                     "season": r["season"], "episode": r["episode"], "air_date": r["air_date"],
                     "name_de": r["title"], "name_en": "", "overview": r["desc"],
@@ -421,7 +461,7 @@ def fs_rows(series, eps, force=False):
                 })
         if not items:
             return [], "fernsehserien.de: keine Folgen mit deutschem Sendedatum gelesen."
-    except (urllib.error.URLError, OSError) as exc:
+    except (HTTPClientError, OSError) as exc:
         return [], f"fernsehserien.de nicht erreichbar: {type(exc).__name__}."
     rows = match_dated(eps, items, "fernsehserien",
                        lambda t: f"{FS_BASE}/{slug}/episodenguide/staffel-{t['season']}/{ids[t['season']]}")

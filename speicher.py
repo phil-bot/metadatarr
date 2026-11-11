@@ -4,7 +4,7 @@ import os
 import sqlite3
 import time
 from config import CACHE_DAYS, DB_PATH
-from core.migrations import DB_LOCK, migrate_database
+from core.migrations import DB_LOCK, migrate_database, migrate_phase3_database
 from net.redaction import REDACTOR
 
 
@@ -42,8 +42,9 @@ def db_insert(sql, args=()):
 def init_db():
     """Migriert additiv und bereinigt bekannte Geheimnisse aus bereits vorhandenen Cache-Einträgen."""
     result = migrate_database(DB_PATH)
+    phase3 = migrate_phase3_database(DB_PATH)
     _redact_existing_cache()
-    return result
+    return phase3 or result
 
 
 def _redact_existing_cache():
@@ -125,6 +126,13 @@ def store_suggestions(series_id, source, rows, season=None):
                 r["level"], time.time(),
             ),
         )
+        saved = db_exec(
+            "SELECT id FROM suggestion WHERE series_id=? AND season=? AND episode=? AND source=? AND source_key=?",
+            (series_id, r["season"], r["episode"], r["source"], r["source_key"]), fetch=True,
+        )
+        if saved:
+            from core.candidates import sync_suggestion
+            sync_suggestion(saved[0]["id"])
 
 
 def cache_get_raw(key):

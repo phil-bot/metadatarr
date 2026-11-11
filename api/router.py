@@ -276,6 +276,9 @@ def dispatch(handler, method, path):
         }, headers, preserve_fields=("csrfToken",))
         return True
     if method == "GET":
+        from api.phase3 import dispatch_phase3
+        if dispatch_phase3(handler, method, path):
+            return True
         if path == "/api/v1/series":
             return _read_inventory(handler)
         if path == "/api/v1/target-languages":
@@ -300,6 +303,9 @@ def dispatch(handler, method, path):
             return True
         body, ok = _read_json_body(handler)
         if not ok:
+            return True
+        from api.phase3 import dispatch_phase3
+        if dispatch_phase3(handler, method, path, body):
             return True
         if method != "PUT":
             known = (path in {"/api/v1/target-languages", "/api/v1/placeholder-rules"} or

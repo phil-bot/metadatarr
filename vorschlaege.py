@@ -1,7 +1,8 @@
 """tba-tickets – Suchkette und Aktionen auf Vorschläge (Haken, Verwerfen, Bearbeiten)."""
 import re
-from config import TITLE_SUFFIX_REGEX, TMDB_API_KEY
-from quellen import fs_rows, match_media, match_tmdb, media_search, tmdb_episodes, tmdb_find_series
+from config import TITLE_SUFFIX_REGEX
+from plugins.registry import SOURCES
+from plugins.sources import context_for_source, source_credentials_configured, source_enabled
 from speicher import BUSY_SQL, db_exec, store_suggestions
 
 
@@ -14,23 +15,27 @@ def clean_title(text):
     return TITLE_SUFFIX_REGEX.sub("", text).strip()
 
 
-def search_series(series, source, season=None, force=False):
-    """Sucht Vorschläge für TBA-Folgen mit Sendedatum, optional nur für eine Staffel.
+def _source_rows(source, series, eps, season=None, force=False):
+    plugin = SOURCES.get(source)
+    if plugin is None:
+        raise RuntimeError("Die konfigurierte Quelle ist nicht registriert.")
+    if isinstance(plugin, type):
+        plugin = plugin()
+    context = context_for_source(source)
+    return plugin.fetch(context, {"series": series, "episodes": eps, "season": season, "force": force})
 
-    force=True umgeht den Zwischenspeicher (für den Nachtlauf). Gibt (Anzahl Treffer, Hinweis) zurück.
-    """
+
+def search_series(series, source, season=None, force=False):
+    """Run one enabled source plugin and persist its suggestions and candidate values."""
     eps = [e for e in series["tba"] if e.get("airDate") and (season is None or e["season"] == season)]
     if not eps:
         where = f" in Staffel {season}" if season is not None else ""
         return 0, f"Keine TBA-Folge mit Sendedatum{where}, daher kein Abgleich."
-    if source == "mediathek":
-        rows = match_media(series, eps, media_search(series["title"], force))
-    else:
-        found = tmdb_find_series(series, force)
-        if found is None:
-            return 0, "Keine eindeutige TMDB-Serie gefunden (Namensähnlichkeit unter 0,8)."
-        rows = match_tmdb(eps, tmdb_episodes(found["id"], force, season), found["id"],
-                          german=series.get("language", "").lower() == "german")
+    if not source_enabled(source):
+        return 0, f"Quelle {source} ist deaktiviert."
+    if source == "tmdb" and not source_credentials_configured("tmdb"):
+        return 0, "TMDB: kein Schlüssel gesetzt."
+    rows = _source_rows(source, series, eps, season=season, force=force)
     store_suggestions(series["id"], source, rows, season)
     return len(rows), ""
 
@@ -41,40 +46,25 @@ STAGE_LABEL = {"mediathek": "Mediathek", "tmdb": "TMDB", "fernsehserien": "ferns
 
 
 def search_chain(series, season=None, force=False, stages=CHAIN_STAGES):
-    """Suchkette: Mediathek, dann TMDB, dann fernsehserien.de. Gibt (Trefferzahlen als Text, Hinweise) zurück.
-
-    Eine Folge mit einem Treffer mittel oder hoch gilt als gefunden und geht nicht weiter.
-    Treffer niedrig (nur ±1 Tag) werden angezeigt, aber die nächste Quelle sucht trotzdem.
-    Jede Quelle ersetzt ihre offenen Vorschläge. Nicht durchlaufene Quellen bleiben unverändert.
-    """
+    """Search only enabled source plugins. No action plugin can be reached from this path."""
     eps = [e for e in series["tba"] if e.get("airDate") and (season is None or e["season"] == season)]
     if not eps:
         where = f" in Staffel {season}" if season is not None else ""
         return "", f"Keine TBA-Folge mit Sendedatum{where}, daher kein Abgleich."
     rest, counts, notes = eps, [], []
     for stage in stages:
-        rows, note = [], ""
-        if rest:
-            if stage == "mediathek":
-                rows = match_media(series, rest, media_search(series["title"], force))
-            elif stage == "tmdb":
-                if not TMDB_API_KEY:
-                    note = "TMDB: kein Schlüssel gesetzt."
-                else:
-                    found = tmdb_find_series(series, force)
-                    if found is None:
-                        note = "TMDB: keine eindeutige Serie gefunden."
-                    else:
-                        rows = match_tmdb(rest, tmdb_episodes(found["id"], force, season), found["id"],
-                                          german=series.get("language", "").lower() == "german")
-            else:
-                rows, note = fs_rows(series, rest, force)
+        if not source_enabled(stage, nightly=(stage in NIGHTLY_STAGES and force)):
+            continue
+        if stage == "tmdb" and not source_credentials_configured("tmdb"):
+            notes.append("TMDB: kein Schlüssel gesetzt.")
+            continue
+        rows = _source_rows(stage, series, rest, season=season, force=force) if rest else []
         store_suggestions(series["id"], stage, rows, season)
         found_eps = {(r["season"], r["episode"]) for r in rows if r["level"] != "niedrig"}
         rest = [e for e in rest if (e["season"], e["episode"]) not in found_eps]
         counts.append(f"{STAGE_LABEL[stage]} {len(rows)}")
-        if note:
-            notes.append(note)
+    if not counts and not notes:
+        notes.append("Keine Quelle ist fuer diese Suche aktiviert.")
     return " · ".join(counts), " ".join(notes)
 
 
@@ -139,6 +129,8 @@ def accept_high(sid, season):
             (sid, season, ep, pick["id"]),
         )
         count += 1
+    from core.candidates import sync_candidate_states
+    sync_candidate_states(series_id=sid, season=season)
     return count, skip_mark, skip_busy
 
 
@@ -171,6 +163,8 @@ def suggestion_action(sug_id, form):
         db_exec("UPDATE suggestion SET status = 'verworfen', marked = 0 WHERE id = ?", (sug_id,))
     elif action == "reopen" and r["status"] == "verworfen":
         db_exec("UPDATE suggestion SET status = 'offen' WHERE id = ?", (sug_id,))
+    from core.candidates import sync_candidate_states
+    sync_candidate_states(series_id=sid, season=season, episode=episode)
     return sid
 
 

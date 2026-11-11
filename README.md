@@ -80,4 +80,10 @@ The API provides read-only inventory endpoints (`GET /api/v1/series` and `GET /a
 
 Placeholder rules support empty, exact, or restricted-regex matching for series and episode titles and overviews. Sonarr does not provide season titles or overviews, so those fields are represented as not supplied rather than inferred. Poster fetching supports Sonarr URL Base paths, reports causes through `X-Poster-Reason`, enforces a 6,000,000-byte image limit, and uses a cache bounded to 32 MiB and 400 entries. Only same-origin `MediaCover` paths are accepted; remote artwork URLs are ignored.
 
-Local validation passed: 43 backend `unittest` tests and 71 legacy regression checks. Tests use local fixtures and mocks, not live Sonarr or other services. No release, tag, or image publication was performed. Published `v0.1.0` and test tag `v0.1.1` remain unchanged; `package-lock.json` remains absent.
+## Phase 3 status
+
+The four built-in sources are registered separately from the TVDB ticket action. DeepL outputs are stored as machine-translated candidates with a link to the exact source candidate. SQLite schema version 2 adds candidate provenance, backfills existing suggestions without rewriting the legacy suggestion/ticket tables, and records action previews. Startup verifies both migration checksums; the migration creates and checks a backup before applying additive changes.
+
+The local JSON API includes ticket list/detail/export and draft creation, source/action status, source search, and a guarded TVDB ticket action. External submission requires an enabled action, a current server-stored preview, explicit confirmation, and a unique idempotency key. The old HTML submit route is non-writing. The nightly search uses only enabled, nightly-approved Mediathek/TMDB sources; it does not submit tickets. Sonarr remains GET-only.
+
+Local validation passed: 61 backend `unittest` tests, 71 legacy regression checks, and Python compilation. Phase 3 provider/action tests use fixtures or mocked HTTP; no live services, production databases, external writes, publishing, CI, Docker, or frontend changes were used. The frontend remains Phase 4 work. No release, tag, or image publication was performed. Published `v0.1.0` and test tag `v0.1.1` remain unchanged; `package-lock.json` remains absent.

@@ -115,6 +115,10 @@ import speicher  # noqa: E402
 import nachtlauf  # noqa: E402
 
 speicher.init_db()
+# The test fixture is the only place where a private network target is explicitly granted.
+import json as _json
+speicher.db_exec("UPDATE source_config SET allow_private=1,granted_hosts_json=? WHERE id='mediathek'",
+                 (_json.dumps([urllib.parse.urlsplit(MEDIA).hostname]),))
 app_srv, BASE = serve(app.Handler)
 
 
