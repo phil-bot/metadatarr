@@ -27,14 +27,14 @@ The GitHub workflow installs the frontend dependencies without generating a lock
 
 **Current published version:** `v0.1.0`. The public GHCR package is available at `ghcr.io/phil-bot/metadatarr`; its version tag is `0.1.0` and `latest` currently points to that release. The image can be pulled without a registry login.
 
-1. In the GitHub repository, open **Releases** and choose **Draft a new release**.
-2. For the next release, choose **Select tag** and enter a new tag such as `v0.1.1`; choose **Create new tag: v0.1.1 on publish** and set the target to `main`.
-3. Add a release title and publish the release. Creating the tag triggers the workflow.
-4. Wait for the GitHub Actions run to finish successfully. The publish job is gated on the frontend build, Python checks, both backend test suites, the no-lockfile checks, and the Docker build.
+1. Choose a **new, unused** release version. Update the `version` in `frontend/package.json` to the matching numeric value (for example, `0.1.2`), commit it to a branch, merge to `main`, and wait for the PR/branch CI checks to pass. The workflow requires the version tag to match this value exactly.
+2. Confirm that the corresponding Git tag has not already been used. The earlier `v0.1.1` was used for a CI test; do not repurpose it as a release tag. Use a fresh version (for example, `v0.1.2` only if it is unused and `frontend/package.json` is `0.1.2`).
+3. In GitHub, open **Releases** and choose **Draft a new release**. Create the matching `vX.Y.Z` tag on `main`, add a release title, then publish.
+4. Wait for GitHub Actions to finish and confirm that the separate `publish` job succeeded. A green PR run alone does not publish an image.
 
-A successful release of `v0.1.1` would publish these tags:
+For example, if `v0.1.2` is still unused and `frontend/package.json` is set to `0.1.2`, a successful release would publish:
 
-- `ghcr.io/phil-bot/metadatarr:0.1.1`
+- `ghcr.io/phil-bot/metadatarr:0.1.2`
 - `ghcr.io/phil-bot/metadatarr:latest`
 
 The workflow authenticates with its job-scoped `GITHUB_TOKEN` (`packages: write` only on the publish job); no PAT or repository secret is needed. The GHCR package is now **Public**, so the server can pull images anonymously without a GHCR login. See [GitHub's package visibility documentation](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
@@ -51,7 +51,7 @@ The supplied Compose example is already pinned to the released image:
 image: ghcr.io/phil-bot/metadatarr:0.1.0
 ```
 
-For a later release, change only the version in this `image:` line (for example, to `0.1.1`). Keep the other service settings unchanged. From the existing Compose project directory, pull and recreate the service:
+For a later release, change only the version in this `image:` line (for example, to `0.1.2` if that is the new version you released). Keep the other service settings unchanged. From the existing Compose project directory, pull and recreate the service:
 
 ```bash
 docker compose pull tba-tickets
@@ -86,4 +86,4 @@ The four built-in sources are registered separately from the TVDB ticket action.
 
 The local JSON API includes ticket list/detail/export and draft creation, source/action status, source search, and a guarded TVDB ticket action. External submission requires an enabled action, a current server-stored preview, explicit confirmation, and a unique idempotency key. The old HTML submit route is non-writing. The nightly search uses only enabled, nightly-approved Mediathek/TMDB sources; it does not submit tickets. Sonarr remains GET-only.
 
-Local validation passed: 61 backend `unittest` tests, 71 legacy regression checks, and Python compilation. Phase 3 provider/action tests use fixtures or mocked HTTP; no live services, production databases, external writes, publishing, CI, Docker, or frontend changes were used. The frontend remains Phase 4 work. No release, tag, or image publication was performed. Published `v0.1.0` and test tag `v0.1.1` remain unchanged; `package-lock.json` remains absent.
+Phase 3 validation (user-reported, 11.11.2026): On the NAS, `python3 -m unittest discover -s tests -v` passed 61/61 tests and `python3 test_tba.py` passed 71/71 checks. The PR-triggered GitHub CI succeeded and the PR was merged. The user built a local image and started a container on the NAS; `/health` and `/api/v1/health` returned HTTP 200 on `127.0.0.1:8083`, and the JSON endpoint reported `status: ok`. The user also reported that the additional Phase 3 functional checks were all verified and working. Provider/action automated tests use fixtures or mocked HTTP; whether any live provider call or real TVDB submission was performed manually has not been specified. The frontend remains Phase 4 work and was not changed for Phase 3. No tag was created for the PR run, and no new registry release or GHCR publication is reported; the last documented published image remains `0.1.0`. `package-lock.json` remains absent.

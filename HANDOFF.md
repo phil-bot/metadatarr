@@ -1,9 +1,8 @@
-# Projektübergabe: TBA-Tickets (Sonarr → Mediathek/TMDB → TheTVDB-Tickets)
+# Projektübergabe: Metadatarr
 
-> **Hinweis (Stand 09.11.2026, Sitzung 28):** Diese Übergabe ist teilweise überholt. Das Repository heißt jetzt **Metadatarr**. Die Version `v0.1.0` ist laut Nutzer in GHCR veröffentlicht (`ghcr.io/phil-bot/metadatarr`, Tags `0.1.0` und `latest`), das Compose-Snippet nutzt dieses Image. Maßgeblich ist `PROJEKTSTAND.md`.
+> **Hinweis (aktualisiert 11.11.2026):** Dieses Dokument ist eine historische Übergabe; die Abschnitte 1–12 beschreiben ältere Projektstände und sind keine aktuelle Aufgabenliste. Maßgeblich sind `PROJEKTSTAND.md` und `README.md`. Phase 3 ist laut Nutzer in einem PR gemergt, CI ist erfolgreich, die NAS-Tests und Container-Health-Checks sind bestanden. Für diesen PR-Lauf wurde kein Tag erstellt; ein neues veröffentlichtes GHCR-Image wurde nicht bestätigt. Die zuletzt dokumentierte veröffentlichte Version bleibt `0.1.0`.
 
-Stand: 16.10.2026 (aktualisiert gegenüber 15.10.2026, siehe Abschnitt 12). Dieses Dokument enthält alles, was ein anderer KI-Agent braucht, um nahtlos weiterzuarbeiten.
-Es enthält **keine Zugangsdaten**. API-Keys liefert der Nutzer selbst.
+Historischer Ausgangsstand: 16.10.2026 (Änderungen bis dahin siehe Abschnitt 12). Dieses Dokument enthält **keine Zugangsdaten**. API-Keys liefert der Nutzer selbst.
 
 ## 1. Ziel
 
@@ -138,7 +137,7 @@ Laut TVDB-FAQ (`https://support.thetvdb.com/kb/faq.php?id=36`, Stand der Seite: 
 
 ## 11. Startprompt für den neuen Agenten (zum Einfügen)
 
-> Du übernimmst ein bestehendes Projekt. Lies zuerst `HANDOFF.md` und die Projektdateien `app.py`, `Dockerfile` und `docker-compose.snippet.yml` vollständig. Antworte auf Deutsch. Stelle klärende Fragen, bevor du antwortest, und stelle mir dein Vorhaben vor, bevor du Code schreibst; warte auf meine Rückmeldung. Gib Code immer als ganze Dateien aus. Beginne mit den offenen Fragen aus Abschnitt 8 und baue danach Schritt 2 (Mediathek-/TMDB-Vorschläge) und Schritt 3 (Ticketvorlagen). Beachte die Einschränkungen aus Abschnitt 7.
+> Du übernimmst Metadatarr. Lies zuerst `ARBEITSANWEISUNGEN.md`, `PROJEKTSTAND.md` und `README.md`; nutze dieses Dokument nur als historischen Kontext. Aktueller Stand laut Nutzer: Phase 3 ist gemergt, der PR-CI-Lauf war erfolgreich, 61 Backend-Tests und 71 Legacy-Checks bestanden, und ein lokales NAS-Image/Container wurde erfolgreich geprüft. Es wurde kein Tag für diesen PR-Lauf erstellt und keine neue GHCR-Veröffentlichung bestätigt. Antworte auf Deutsch. Bearbeite nur den vom Nutzer ausdrücklich angefragten nächsten Punkt; keine Release-/Tag-/Publish-Aktion ohne ausdrückliche Freigabe.
 
 ## 12. Änderungen seit Stand 15.10.2026
 
@@ -147,5 +146,14 @@ Laut TVDB-FAQ (`https://support.thetvdb.com/kb/faq.php?id=36`, Stand der Seite: 
 - Der Port `ports: "8083:8080"` ist bewusst gesetzt. Der Schutz über Traefik gilt weiterhin für den Traefik-Zugang, der Host-Port braucht zusätzlich eine Absicherung.
 - Die `.env`-Variable für den Sonarr-Key heißt `SONARR_APIKEY`. Das Compose-Snippet übergibt sie als `SONARR_API_KEY` an die App.
 - Der Nutzer hat Schritt 1 (App und Compose-Snippet) als funktionsfähig bestätigt.
-- Offen: Host-Pfad der Stack-Compose-Datei.
+- Historischer offener Punkt vom 16.10.2026: Host-Pfad der Stack-Compose-Datei.
+
+## 13. Aktueller Status (11.11.2026)
+
+- Phase-3-PR laut Nutzer gemergt; der PR-ausgelöste GitHub-CI-Lauf war erfolgreich. Für diesen Lauf wurde kein Tag erstellt.
+- Auf dem NAS bestanden: `python3 -m unittest discover -s tests -v` (**61/61**) und `python3 test_tba.py` (**71/71**).
+- Nutzer baute lokal ein Image und startete einen Container. Die Health-Endpunkte `/health` und `/api/v1/health` auf `127.0.0.1:8083` antworteten mit HTTP 200; die JSON-Antwort meldete `status: ok`, `service: metadatarr`, `apiVersion: v1`.
+- Nutzer bestätigte, dass auch die weiteren besprochenen Phase-3-Funktionsprüfungen in Ordnung sind. Welche davon Live-Dienste oder externe Schreibaktionen umfassten, wurde nicht einzeln dokumentiert.
+- Kein neuer Release, Tag oder GHCR-Push aus dem PR bestätigt; der lokale NAS-Build ist davon getrennt. Letzter dokumentierter veröffentlichter GHCR-Stand: `0.1.0`.
+- Phase 3 gilt aus Nutzersicht als abgeschlossen. Die Abschnitte 1–12 und offenen Punkte darin sind historisch; für weitere Arbeit den aktuellen `PROJEKTSTAND.md` und `README.md` verwenden.
 

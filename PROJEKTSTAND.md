@@ -1,13 +1,22 @@
 # Projektstand: Metadatarr (vormals TBA-Tickets für TheTVDB)
 
-**Zuletzt aktualisiert:** 10.11.2026 (Phase 3 umgesetzt und lokal abgenommen; keine Veröffentlichung)
-**Übergabedokument:** `HANDOFF.md`, Stand 15.10.2026, SHA-256 `c10f52960f0d786296ab4e64fc677ff33df44a0820fb79334eb96ac8af36b512`
+**Zuletzt aktualisiert:** 11.11.2026 (Phase 3 gemergt und laut Nutzer in CI, Tests und lokalem NAS-Container erfolgreich geprüft; kein neuer Release bestätigt)
+**Übergabedokument:** `HANDOFF.md` enthält historischen Kontext; maßgeblich für den aktuellen Stand sind `PROJEKTSTAND.md` und `README.md`.
 
 ---
 
 ## Nächster Schritt
 
-**Aktueller Stand (10.11.2026), maßgeblich vor den älteren Punkten unten:**
+**Aktueller Stand (11.11.2026):**
+- ✅ **Nutzer:** Phase‑3-PR gemergt; der PR-ausgelöste GitHub-CI-Lauf war erfolgreich. Für diesen Lauf wurde kein Tag erstellt.
+- ✅ **Nutzer auf dem NAS:** `python3 -m unittest discover -s tests -v` — 61/61 bestanden; `python3 test_tba.py` — 71/71 bestanden.
+- ✅ **Nutzer auf dem NAS:** Image lokal gebaut und Container gestartet. `/health` und `/api/v1/health` auf `127.0.0.1:8083` antworten mit HTTP 200; die JSON-API meldet `status: ok` und `apiVersion: v1`.
+- ✅ **Nutzer:** Die zusätzlich besprochenen Phase‑3-Funktionsprüfungen wurden als geprüft und in Ordnung bestätigt. Einzelne Live-Dienst- oder externe Schreibtests sind nicht separat dokumentiert.
+- ℹ️ **Veröffentlichung:** Ein lokaler Image-Build/Containerstart ist kein GHCR-Push. Für den gemergten PR wurde kein Release/Tag oder neues veröffentlichtes Image bestätigt; letzter dokumentierter GHCR-Release bleibt `0.1.0`.
+- ✅ **Phase 3:** im PR integriert und in der Nutzerumgebung abgenommen. Kein offener Phase‑3-Schritt bekannt.
+- ➡️ **Nächster Schritt:** keine weitere Phase‑3-Aktion. Frontend-Ausbau (Phase 4) oder ein separater, versionierter Release nur nach ausdrücklicher Nutzerentscheidung.
+
+**Historischer Status vor dem PR-Merge (10.11.2026; nicht mehr maßgeblich):**
 - ✅ **Nutzer (Sitzung 28):** GitHub-CI für den Stand mit v0.1.0 erfolgreich; Image `ghcr.io/phil-bot/metadatarr` öffentlich, Tags `0.1.0` und `latest` veröffentlicht. Laufzeit-Checks (`/health`, `/api/v1/health`, `/app/`) bestanden. Vom Agenten nicht unabhängig geprüft.
 - ✅ **Compose-Snippet:** `image: ghcr.io/phil-bot/metadatarr:0.1.0`; Ports, Volumes, Umgebungsvariablen und Labels unverändert.
 - ✅ **Frontend:** `vite` in `frontend/package.json` auf 6.3.6 angehoben. Befund GHSA-jqfw-vq24-v9c3; vollständiges `npm audit` offline ohne Lockdatei nicht möglich. Keine `package-lock.json`.
@@ -135,6 +144,12 @@ Stand laut Ordner-Abfrage (`list`) am 09.11.2026:
 Historischer Hinweis (Sitzungen 2–13): In früheren Bash-Arbeitskopien waren `(2)`-Kopien sichtbar, im Projektordner laut Nutzer nicht. **Aktueller Check 09.11.2026:** Die Projektliste zeigt keine `(2)`-Dateien; auch `ls /mnt/data` zeigt keine entsprechenden Root-Dateien.
 
 ---
+
+## Änderungslog – aktuelle Sitzung
+
+| Datum | Sitzung | Änderung und Ergebnis |
+| --- | --- | --- |
+| 11.11.2026 | 31 | Projektstatus nach Nutzerbestätigung aktualisiert: Phase‑3-PR gemergt, PR-CI erfolgreich, NAS-Testläufe 61/61 und 71/71, lokales Image/Container und beide Health-Endpunkte erfolgreich. README um Status und korrektes Versions-/Tag-Verfahren ergänzt; HANDOFF als historisch gekennzeichnet und mit aktuellem Stand versehen. Kein Release/Tag/GHCR-Push aus diesem PR bestätigt; `UMSETZUNGSPLAN.md` und Anwendungscode unverändert. |
 
 ## 2. Fortschritt nach Schritten
 
