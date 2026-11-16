@@ -7,6 +7,14 @@
 
 ## Nächster Schritt
 
+**Phase 4 – Frontend-Grundgerüst (Stand: Code geschrieben, nicht gebaut):**
+- ✅ **Agent:** Vollständige React-Oberfläche unter `frontend/src/` geschrieben: Übersicht, Serien (inkl. Detail), Fehlende Metadaten, Quellen, Tickets (inkl. Detail), TVDB-Aktionen (Vorschau, Bestätigung, Einreichung), Einstellungen (Zielsprachen, Platzhalterregeln), Diagnose. Routen unter `/app/`.
+- ✅ **Geprüft in der Sandbox:** esbuild-Bündelung; TypeScript-Strictprüfung gegen Shim (17 Implicit-any-Warnungen im Shim sind Artefakte); 26 Logik-/Render-Prüfungen; SSR-Render aller 11 Routen.
+- ⚠️ **Nicht geprüft:** `npm run build` mit echten Abhängigkeiten, Docker-Build, Sichtprüfung Handy/Desktop, `@types/react` fehlt in der Sandbox.
+- ⚠️ **Bekannte Lücken:** kein JSON-Endpunkt für Vorschläge/Kandidaten (nur HTML-Liste unter `/series/{id}/staffel`); kein Diagnose-Endpunkt; Aktion „TVDB-Ticket“ nur serverseitig aktivierbar; Vite-Dev-Proxy mit `changeOrigin` kann Schreibzugriffe wegen Origin/Host ablehnen.
+- ⚠️ **Aufräumen:** Beim Schreiben entstand versehentlich `frontend/src/pages/SeriesDetail (2).tsx` (Dublette). Nicht verwendet; vom Nutzer manuell löschen.
+- ➡️ **Nächster Schritt, Nutzer:** `cd frontend && npm install && npm run build`, danach `docker compose build`; Sichtprüfung auf Handy und Desktop mit Screenshots zurückmelden.
+
 **Aktueller Stand (11.11.2026):**
 - ✅ **Nutzer:** Phase‑3-PR gemergt; der PR-ausgelöste GitHub-CI-Lauf war erfolgreich. Für diesen Lauf wurde kein Tag erstellt.
 - ✅ **Nutzer auf dem NAS:** `python3 -m unittest discover -s tests -v` — 61/61 bestanden; `python3 test_tba.py` — 71/71 bestanden.
